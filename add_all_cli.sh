@@ -1,3 +1,13 @@
+#!/bin/bash
+# add_all_cli.sh — adds --all mode to main.py (fetch every football match
+# for the date, across all tournaments, via fetch_events_for_all_tournaments)
+# and parallelizes the --with-stats per-match enrichment loop (same pattern
+# as BetExplorer's main.py: ThreadPoolExecutor, since with potentially
+# hundreds of matches, sequential O/U+standings+h2h fetching would be slow).
+# Run from the repo root: bash add_all_cli.sh
+set -e
+
+cat > main.py << 'EOF'
 from __future__ import annotations
 
 import argparse
@@ -138,9 +148,12 @@ def main() -> None:
     over_odds = [m.odds_ou.over for m in matches if m.odds_ou.over]
     if over_odds:
         avg_over = sum(over_odds) / len(over_odds)
-        print()
-        print(f"Over 2.5 summary: {len(over_odds)}/{len(matches)} matches have an Over 2.5 price, avg odds = {avg_over:.2f}")
+        print(f"\\nOver 2.5 summary: {len(over_odds)}/{len(matches)} matches have an Over 2.5 price, avg odds = {avg_over:.2f}")
 
 
 if __name__ == "__main__":
     main()
+EOF
+
+echo "Verifying syntax..."
+python -m py_compile superbet_scraper/*.py main.py tools/*.py && echo "OK — syntax valid."

@@ -1,0 +1,61 @@
+name: Daily 100% Over 2.5 recommendations
+
+on:
+  schedule:
+    # 07:00 UTC — adjust to your preferred send time. Cron is always UTC;
+    # this is ~09:00/10:00 Romania time depending on DST.
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab to test
+
+jobs:
+  send-recommendations:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout SuperBet
+        uses: actions/checkout@v4
+        with:
+          path: SuperBet
+
+      - name: Checkout BetExplorer
+        uses: actions/checkout@v4
+        with:
+          repository: andrei0182/bet
+          ref: claude/trusting-ramanujan-2xdf01
+          path: bet
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install BetExplorer dependencies
+        working-directory: bet
+        run: pip install -r requirements.txt
+
+      - name: Install SuperBet dependencies
+        working-directory: SuperBet
+        run: pip install -r requirements.txt
+
+      - name: Compute today's date
+        id: date
+        run: echo "value=$(date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Run BetExplorer scraper (with stats)
+        working-directory: bet
+        run: python main.py --date ${{ steps.date.outputs.value }} --with-stats
+
+      - name: Run SuperBet scraper (all leagues)
+        working-directory: SuperBet
+        run: python main.py --date ${{ steps.date.outputs.value }} --all
+
+      - name: Send recommendation email
+        working-directory: SuperBet
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          python daily_recommendations.py \
+            --bet-xlsx ../bet/output/matches.xlsx \
+            --superbet-xlsx output/matches.xlsx \
+            --date ${{ steps.date.outputs.value }}

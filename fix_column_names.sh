@@ -1,3 +1,15 @@
+#!/bin/bash
+# fix_column_names.sh — [SuperBet repo] rewrites daily_recommendations.py to
+# read the ACTUAL column headers that both projects' export.py write to
+# their .xlsx files (the descriptive labels, e.g. "Home Team", not the
+# internal key "home_team") — and to pick the right source column for each
+# field after the merge, since both sheets share several column names
+# ("League", "Home Team", "Odds Over", "Match Link", ...) and pandas
+# suffixes them on merge.
+# Run from the SuperBet repo root: bash fix_column_names.sh
+set -e
+
+cat > daily_recommendations.py << 'EOF'
 """Daily recommendation email: cross-references BetExplorer's "100% Over
 2.5" hit-rate data (both teams went Over 2.5 in every game of their
 season so far) against SuperBet's own daily match list (live odds,
@@ -183,3 +195,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+EOF
+
+echo "Verifying syntax..."
+python3 -c "import ast; ast.parse(open('daily_recommendations.py').read())" && echo "OK -- syntax valid."

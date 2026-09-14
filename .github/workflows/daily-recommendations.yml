@@ -1,5 +1,8 @@
 name: Daily 100% Over 2.5 recommendations
 
+permissions:
+  contents: write  # needed to commit recommendations_log.csv back to the repo
+
 on:
   schedule:
     # 4:00 AM Romania time, year-round. Cron is always UTC with no DST
@@ -59,6 +62,11 @@ jobs:
         id: date
         run: echo "value=$(date +%F)" >> "$GITHUB_OUTPUT"
 
+      - name: Check pending results from previous days
+        if: env.SKIP_RUN != 'true'
+        working-directory: SuperBet
+        run: python check_results.py --bet-repo ../bet
+
       - name: Run BetExplorer scraper (with stats)
         if: env.SKIP_RUN != 'true'
         working-directory: bet
@@ -81,3 +89,13 @@ jobs:
             --bet-xlsx ../bet/output/matches.xlsx \
             --superbet-xlsx output/matches.xlsx \
             --date ${{ steps.date.outputs.value }}
+
+      - name: Commit updated results log
+        if: env.SKIP_RUN != 'true'
+        working-directory: SuperBet
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add recommendations_log.csv
+          git diff --cached --quiet && echo "No log changes to commit." || git commit -m "Update recommendations log ($(date +%F))"
+          git push

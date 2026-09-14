@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+output/*.xlsx
+.venv/
+
+# Session scratch/debug files — never commit these
+test_*.py
+debug_*.py
+*.html
+chromedriver.log
+run_log*.txt
+run_final*.txt

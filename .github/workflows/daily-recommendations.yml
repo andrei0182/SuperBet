@@ -46,7 +46,7 @@ jobs:
 
       - name: Run SuperBet scraper (all leagues)
         working-directory: SuperBet
-        run: python main.py --date ${{ steps.date.outputs.value }} --all
+        run: python main.py --date ${{ steps.date.outputs.value }} --all --with-stats
 
       - name: Send recommendation email
         working-directory: SuperBet

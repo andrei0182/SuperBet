@@ -20,11 +20,15 @@ jobs:
     steps:
       - name: Skip unless this is actually 4 AM Romania time
         run: |
-          hour=$(TZ="Europe/Bucharest" date +%H)
-          echo "Current Romania local hour: $hour"
-          if [ "$hour" != "04" ]; then
-            echo "Not 4 AM Romania time right now (this is the other cron entry, for the other DST offset) -- skipping the rest of the job."
-            echo "SKIP_RUN=true" >> "$GITHUB_ENV"
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Manually triggered (workflow_dispatch) -- running regardless of current time."
+          else
+            hour=$(TZ="Europe/Bucharest" date +%H)
+            echo "Current Romania local hour: $hour"
+            if [ "$hour" != "04" ]; then
+              echo "Not 4 AM Romania time right now (this is the other cron entry, for the other DST offset) -- skipping the rest of the job."
+              echo "SKIP_RUN=true" >> "$GITHUB_ENV"
+            fi
           fi
 
       - name: Checkout SuperBet

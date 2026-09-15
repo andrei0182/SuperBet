@@ -72,6 +72,17 @@ jobs:
         working-directory: bet
         run: python main.py --date ${{ steps.date.outputs.value }} --with-stats
 
+      - name: Upload BetExplorer failure debug files
+        if: failure() && env.SKIP_RUN != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: betexplorer-failure-debug
+          path: |
+            bet/load_date_failure.html
+            bet/load_date_failure.png
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Run SuperBet scraper (all leagues)
         if: env.SKIP_RUN != 'true'
         working-directory: SuperBet

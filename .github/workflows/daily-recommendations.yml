@@ -1,41 +1,50 @@
 name: Daily 100% Over 2.5 recommendations
 
 permissions:
-  contents: write  # needed to commit recommendations_log.csv back to the repo
+  contents: write  # needed to commit recommendations_log.csv and .last_run_date back to the repo
 
 on:
   schedule:
     # 4:00 AM Romania time, year-round. Cron is always UTC with no DST
-    # concept, so two entries cover both of Romania's UTC offsets — the
-    # guard step below then skips whichever one does not actually land on
-    # 4 AM local (handles the DST-switch week where both/neither would
-    # otherwise be exactly right).
-    - cron: "0 1 * * *"  # 4:00 Romania time when EEST (UTC+3, summer)
-    - cron: "0 2 * * *"  # 4:00 Romania time when EET (UTC+2, winter)
+    # concept, so two entries cover both of Romania's UTC offsets.
+    # IMPORTANT: GitHub Actions does NOT guarantee scheduled workflows fire
+    # exactly on time -- they can be delayed by hours (CONFIRMED 2026-09-16:
+    # a run scheduled for 01:00 UTC actually started at 07:23 UTC). The
+    # guard below therefore uses a wide WINDOW (04-10 Romania time), not an
+    # exact-hour match, plus an "already sent today" marker so we don't
+    # send twice if both cron entries end up firing inside the window.
+    - cron: "0 1 * * *"  # ~4:00 Romania time when EEST (UTC+3, summer)
+    - cron: "0 2 * * *"  # ~4:00 Romania time when EET (UTC+2, winter)
   workflow_dispatch: {}  # lets you trigger it manually from the Actions tab to test
 
 jobs:
   send-recommendations:
     runs-on: ubuntu-latest
     steps:
-      - name: Skip unless this is actually 4 AM Romania time
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Manually triggered (workflow_dispatch) -- running regardless of current time."
-          else
-            hour=$(TZ="Europe/Bucharest" date +%H)
-            echo "Current Romania local hour: $hour"
-            if [ "$hour" != "04" ]; then
-              echo "Not 4 AM Romania time right now (this is the other cron entry, for the other DST offset) -- skipping the rest of the job."
-              echo "SKIP_RUN=true" >> "$GITHUB_ENV"
-            fi
-          fi
-
       - name: Checkout SuperBet
-        if: env.SKIP_RUN != 'true'
         uses: actions/checkout@v4
         with:
           path: SuperBet
+
+      - name: Skip if already sent today (avoids duplicates when both cron entries land in-window)
+        working-directory: SuperBet
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          today=$(TZ="Europe/Bucharest" date +%F)
+          if [ -f .last_run_date ] && [ "$(cat .last_run_date)" == "$today" ]; then
+            echo "Already sent today's report ($today) -- skipping (likely the second cron entry, or a delayed retry from GitHub)."
+            echo "SKIP_RUN=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Skip if outside the acceptable morning window (04-10 Romania time)
+        if: env.SKIP_RUN != 'true' && github.event_name != 'workflow_dispatch'
+        run: |
+          hour=$(TZ="Europe/Bucharest" date +%-H)
+          echo "Current Romania local hour: $hour"
+          if [ "$hour" -lt 4 ] || [ "$hour" -gt 10 ]; then
+            echo "Outside the accepted window (04-10) -- skipping (waiting for the next cron entry or tomorrow)."
+            echo "SKIP_RUN=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Checkout BetExplorer
         if: env.SKIP_RUN != 'true'
@@ -64,7 +73,7 @@ jobs:
       - name: Compute today's date
         if: env.SKIP_RUN != 'true'
         id: date
-        run: echo "value=$(date +%F)" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(TZ='Europe/Bucharest' date +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Check pending results from previous days
         if: env.SKIP_RUN != 'true'
@@ -105,12 +114,14 @@ jobs:
             --superbet-xlsx output/matches.xlsx \
             --date ${{ steps.date.outputs.value }}
 
-      - name: Commit updated results log
+      - name: Commit updated results log and run marker
         if: env.SKIP_RUN != 'true'
         working-directory: SuperBet
         run: |
+          today=$(TZ="Europe/Bucharest" date +%F)
+          echo "$today" > .last_run_date
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add recommendations_log.csv
-          git diff --cached --quiet && echo "No log changes to commit." || git commit -m "Update recommendations log ($(date +%F))"
+          git add recommendations_log.csv .last_run_date
+          git diff --cached --quiet && echo "No log changes to commit." || git commit -m "Update recommendations log ($today)"
           git push

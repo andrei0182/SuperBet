@@ -83,6 +83,98 @@ def backtest(
     typer.echo(f"\nRezultate în {out_dir}/ (bets.csv, predictions.csv, summary.json)")
 
 
+@app.command()
+def value(
+    odds: Path = typer.Option(..., help="Sharp odds (football-data layout: Date,HomeTeam,AwayTeam,PSH,PSD,PSA,P>2.5,P<2.5 + soft books)."),
+    books: str = typer.Option("SB", help="Soft book codes, comma separated (columns <code>H/D/A, <code>>2.5/<2.5)."),
+    superbet_xlsx: Path | None = typer.Option(None, help="Superbet scraper export; its odds become book SB."),
+    date: str | None = typer.Option(None, help="Match date for --superbet-xlsx (YYYY-MM-DD)."),
+    team_map: Path | None = typer.Option(None, help="CSV superbet_name,name for teams spelled differently."),
+    ev_min: float = typer.Option(0.02), max_odds: float = typer.Option(8.0),
+    kelly: float = typer.Option(0.25), cap: float = typer.Option(0.02), bankroll: float = typer.Option(1000.0),
+    log: Path = typer.Option(Path("outputs/value_log.csv"), help="Bet log (appended; first price kept)."),
+) -> None:
+    """Value bets: soft-book price above the de-vigged sharp (Pinnacle) price."""
+    from .value import append_log, find_value, join_sources, load_odds_table, load_superbet_excel
+
+    table = load_odds_table(odds)
+    if superbet_xlsx is not None:
+        if date is None:
+            raise typer.BadParameter("--date is required with --superbet-xlsx")
+        mapping = None
+        if team_map is not None:
+            m = pd.read_csv(team_map)
+            mapping = dict(zip(m["superbet_name"], m["name"]))
+        table, unmatched = join_sources(table, load_superbet_excel(superbet_xlsx, date), mapping)
+        if len(unmatched):
+            typer.echo(f"{len(unmatched)} meciuri Superbet fără pereche în cotele sharp (completează --team-map):")
+            typer.echo(unmatched.head(20).to_string(index=False))
+    staking = StakingConfig(ev_min=ev_min, kelly=kelly, cap=cap, bankroll=bankroll)
+    bets = find_value(table, [b.strip() for b in books.split(",")], staking, ev_min, max_odds)
+    if bets.empty:
+        typer.echo("Niciun pariu cu valoare.")
+        return
+    append_log(bets, log)
+    with pd.option_context("display.width", 200, "display.max_columns", None):
+        typer.echo(bets.round({c: 3 for c in ("odds", "fair_p", "fair_odds", "ev", "stake")}).to_string(index=False))
+    typer.echo(f"\n{len(bets)} pariuri adăugate în {log}")
+
+
+@app.command("value-settle")
+def value_settle(
+    log: Path = typer.Option(Path("outputs/value_log.csv")),
+    results: Path = typer.Option(..., help="Results with FTHG,FTAG and closing PSCH/PSCD/PSCA, PC>2.5/PC<2.5."),
+    out: Path = typer.Option(Path("outputs/value_settled.csv")),
+) -> None:
+    """Settle logged bets and measure them against the Pinnacle closing line."""
+    from .value import load_odds_table, read_log, settle, summarize
+
+    settled = settle(read_log(log), load_odds_table(results))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    settled.to_csv(out, index=False)
+    typer.echo(format_value_summary(summarize(settled)))
+
+
+@app.command("value-backtest")
+def value_backtest_cmd(
+    data: Path = typer.Option(Path("data/raw")),
+    books: str = typer.Option("B365,BW,WH,VC,IW,1XB", help="Soft books to shop across."),
+    start: str | None = typer.Option(None), ev_min: float = typer.Option(0.02), max_odds: float = typer.Option(8.0),
+    kelly: float = typer.Option(0.25), cap: float = typer.Option(0.02), bankroll: float = typer.Option(1000.0),
+    out: Path = typer.Option(Path("outputs/value_backtest.csv")),
+) -> None:
+    """Historical value test: bets from early odds, judged at Pinnacle closing (football-data files)."""
+    from .value import summarize, value_backtest
+
+    staking = StakingConfig(ev_min=ev_min, kelly=kelly, cap=cap, bankroll=bankroll)
+    settled = value_backtest(data, [b.strip() for b in books.split(",")], start, staking, ev_min, max_odds)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    settled.to_csv(out, index=False)
+    typer.echo(format_value_summary(summarize(settled)))
+    by = settled.groupby(settled["date"].dt.year).agg(bets=("ev", "size"), ev_close=("ev_close", "mean"),
+                                                       yield_flat=("profit_flat", "mean"))
+    typer.echo("\nPe ani:\n" + by.round(4).to_string())
+
+
+def format_value_summary(s: dict) -> str:
+    """Human-readable value-betting report; closing EV first, since realized profit is mostly noise."""
+    se = lambda v: "-" if v is None else f"± {v * 100:.2f}%"  # noqa: E731
+    lines = [
+        f"Pariuri: {s['bets']} (decontate {s['settled']}, cu cote de închidere {s['with_closing_odds']})",
+        f"EV la închidere (Pinnacle, de-vig): {_fmt(s['ev_close_mean'], True)} {se(s['ev_close_se'])}  <- estimarea avantajului",
+        f"CLV mediu: {_fmt(s['clv_mean'], True)}, pariuri cu CLV pozitiv: {_fmt(s['clv_positive_share'], True)}",
+        f"Hit rate: {_fmt(s['hit_rate'], True)} | yield mize egale: {_fmt(s['yield_flat'], True)} {se(s['yield_flat_se'])}"
+        f" | yield Kelly: {_fmt(s['yield_kelly'], True)} | profit: {s['profit']:.2f}",
+    ]
+    if s["ev_close_mean"] is not None and s["ev_close_se"]:
+        z = s["ev_close_mean"] / s["ev_close_se"]
+        verdict = ("EV la închidere clar pozitiv: prețurile luate au bătut linia de închidere."
+                   if z > 2 else "EV la închidere neconcludent: încă nu există dovadă de avantaj.")
+        lines.append(verdict)
+    lines.append("Profitul realizat are nevoie de mii de pariuri ca să confirme un avantaj de 2-3%.")
+    return "\n".join(lines)
+
+
 def _fmt(v: float | None, pct: bool = False) -> str:
     if v is None:
         return "-"

@@ -107,6 +107,38 @@ Exemplu de rulare: pune `E0_2021.csv`, `E0_2122.csv`, `E0_2223.csv`, `E0_2324.cs
 - `predictions.csv` — toate predicțiile out-of-sample de după start;
 - `summary.json` — configurația, ξ ales, coeficienții blend-ului și toate metricile.
 
+### Value betting față de Pinnacle (fără model)
+
+Backtest-ul de mai sus arată că modelul Dixon-Coles nu bate piața. Singurul semnal pozitiv găsit pe date reale
+nu vine dintr-un model, ci din **momentul pariului și compararea caselor**: probabilitatea „corectă” e cota Pinnacle
+de dinainte de meci (după de-vig, metoda power), iar pariul se face la o casă obișnuită doar când oferă un preț
+cu ≥ 2% peste. Verificarea se face la închidere: **EV la închidere** = cota luată × probabilitatea Pinnacle de
+închidere − 1 (principalul indicator de avantaj; profitul realizat are nevoie de mii de pariuri ca să confirme 2–3%).
+
+Pe 22 de ligi football-data, sezoanele 2022/23–2024/25, cea mai bună cotă din 6 case (B365, Bwin, William Hill,
+BetVictor, Interwetten, 1xBet), prag 2%, cote ≤ 8: 1.849 pariuri, EV la închidere **+2.6% ± 0.2%** (pozitiv în
+fiecare an), profit realizat +4.0% ± 3.7% (neconcludent statistic).
+
+```bash
+# test istoric pe fișierele football-data (cotele de dinainte de meci aleg pariul, închiderea îl judecă)
+superbet value-backtest --data data/raw --books B365,BW,WH,VC,IW,1XB --start 2022-08-01
+
+# zilnic: cote sharp (PSH,PSD,PSA,P>2.5,P<2.5) + cotele Superbet din scraper
+superbet value --odds sharp.csv --superbet-xlsx output/matches.xlsx --date 2026-09-24 \
+    --team-map team_map.csv --ev-min 0.02 --bankroll 1000
+# -> pariurile cu valoare se adaugă în outputs/value_log.csv (se păstrează prima cotă văzută)
+
+# după meciuri: rezultate + cote de închidere Pinnacle (PSCH.., PC>2.5..)
+superbet value-settle --log outputs/value_log.csv --results results.csv
+```
+
+`--odds` acceptă orice fișier în format football-data; casele „soft” se dau cu `--books` (coloanele
+`<cod>H/D/A`, `<cod>>2.5/<cod><2.5`). Cu `--superbet-xlsx`, cotele Superbet devin cartea `SB`; numele de echipe
+care diferă între surse se potrivesc prin `team_map.csv` (`superbet_name,name`), iar cele nepotrivite sunt afișate.
+
+Limitări specifice: ai nevoie de cotele Pinnacle în timp real (în România, de regulă, printr-un API de cote plătit);
+casele limitează rapid conturile care bat linia de închidere; rezultatul istoric e pe case britanice, nu pe Superbet.
+
 ### Limitări
 
 - Dixon-Coles folosește doar scorurile: fără accidentări, rotații, motivație, vreme, xG.

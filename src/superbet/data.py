@@ -94,6 +94,8 @@ def clean_frame(raw: pd.DataFrame, odds_source: str = "B365", league: str | None
     df = pd.concat([df, _pick_odds(raw, odds_source)], axis=1)
     for target, name in CLOSING_COLUMNS.items():
         df[target] = pd.to_numeric(raw[name], errors="coerce") if name in raw.columns else np.nan
+    odds_cols = list(ODDS_SOURCES[odds_source]) + list(CLOSING_COLUMNS)
+    df[odds_cols] = df[odds_cols].where(df[odds_cols] > 1.0)  # 0 / <=1 means missing in the source files
     df = df[(df["home"] != "nan") & (df["away"] != "nan")]
     if not require_scores:
         return df.dropna(subset=["date"])[OUTPUT_COLUMNS]

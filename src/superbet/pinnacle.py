@@ -65,9 +65,27 @@ def events_to_frame(payload: dict, taken_at: pd.Timestamp) -> pd.DataFrame:
     return df.dropna(subset=["PSH", "PSD", "PSA"], how="all").reset_index(drop=True)
 
 
+def compact_history(history: str | Path, keep_days: int = 45) -> pd.DataFrame:
+    """Keep, per event, only the latest snapshot taken before kick-off, and drop events older than `keep_days`.
+
+    That is all `closing_lines` needs, so the history stays small enough to commit.
+    """
+    h = pd.read_csv(history)
+    columns = list(h.columns)  # appends are positional, so the column order must not change
+    taken = pd.to_datetime(h["taken_at"], utc=True, format="mixed")
+    starts = pd.to_datetime(h["starts"], utc=True, format="mixed")
+    cutoff = taken.max() - pd.Timedelta(days=keep_days)
+    h = h[(taken < starts) & (starts >= cutoff)]
+    h = h.assign(_t=taken).sort_values("_t").groupby("event_id", as_index=False).last()
+    h = h.sort_values(["_t", "event_id"])[columns]
+    h.to_csv(history, index=False)
+    return h
+
+
 def snapshot(out: str | Path, history: str | Path | None = None, days: int = 3,
-             key: str | None = None, now: pd.Timestamp | None = None, payload: dict | None = None) -> pd.DataFrame:
-    """Write the current sharp table (matches in the next `days`) and append it to `history`."""
+             key: str | None = None, now: pd.Timestamp | None = None, payload: dict | None = None,
+             compact: bool = True) -> pd.DataFrame:
+    """Write the current sharp table (matches in the next `days`) and add it to `history` (compacted by default)."""
     now = now or pd.Timestamp.now(tz="UTC")
     payload = payload if payload is not None else fetch_prematch(key or api_key())
     df = events_to_frame(payload, now)
@@ -78,7 +96,11 @@ def snapshot(out: str | Path, history: str | Path | None = None, days: int = 3,
     if history is not None:
         history = Path(history)
         history.parent.mkdir(parents=True, exist_ok=True)
+        if history.exists():  # align with the file's header, whatever order it was written in
+            df = df[pd.read_csv(history, nrows=0).columns.tolist()]
         df.to_csv(history, mode="a", header=not history.exists(), index=False)
+        if compact:
+            compact_history(history)
     return df
 
 

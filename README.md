@@ -152,6 +152,23 @@ românești ale naționalelor traduse (Japonia → Japan, Coreea de Sud → Sout
 `<cod>H/D/A`, `<cod>>2.5/<cod><2.5`). Cu `--superbet-xlsx`, cotele Superbet devin cartea `SB`; numele de echipe
 care diferă între surse se potrivesc prin `team_map.csv` (`superbet_name,name`), iar cele nepotrivite sunt afișate.
 
+#### Automatizare (GitHub Actions)
+
+| Workflow | Când | Ce face |
+|---|---|---|
+| `pinnacle-snapshots.yml` | la fiecare 2 ore | o captură Pinnacle; ultima dinainte de start = linia de închidere |
+| `value-bets.yml` | zilnic ~09–10 (ora României) | scraper Superbet pentru azi → pariuri cu EV ≥ 2% → email cu pariurile și bilanțul EV la închidere |
+
+Consum pinnapi: ~13 cereri/zi din cele 100 gratuite. Starea (capturile compactate, jurnalul pariurilor,
+`value_settled.csv`) se păstrează pe branch-ul `value-data`, creat automat la prima rulare, ca să nu umple
+`main` cu commit-uri. Opțional, `team_map.csv` în rădăcina repo-ului (`superbet_name,name`) pentru echipele
+care nu se potrivesc automat. Rulare manuală: tab-ul Actions → workflow → **Run workflow**; local:
+`python value_daily.py --date 2026-09-24 --dry-run` (tipărește emailul în loc să-l trimită).
+
+Secrete necesare (Settings → Secrets and variables → Actions): `PINNAPI_KEY` plus cele existente
+`GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `EMAIL_TO`. Fără `PINNAPI_KEY`, ambele workflow-uri se opresc cu un
+mesaj, fără eroare.
+
 Limitări specifice: ai nevoie de cotele Pinnacle în timp real (în România, de regulă, printr-un API de cote plătit);
 casele limitează rapid conturile care bat linia de închidere; rezultatul istoric e pe case britanice, nu pe Superbet.
 

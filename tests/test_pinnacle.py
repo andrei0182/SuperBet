@@ -43,7 +43,16 @@ def test_snapshot_writes_table_and_history(tmp_path):
     snapshot(out, hist, days=3, now=NOW + pd.Timedelta(hours=5), payload=_payload(price_home=1.9))
     sharp = pd.read_csv(out)
     assert sharp["HomeTeam"].tolist() == ["Arsenal", "Leeds"]  # "Far" is beyond 3 days
-    assert "taken_at" not in sharp and len(pd.read_csv(hist)) == 4
+    assert "taken_at" not in sharp
+    h = pd.read_csv(hist)  # compacted: one row per match, the latest pre-kick-off snapshot
+    assert len(h) == 2 and h.set_index("HomeTeam").loc["Arsenal", "PSH"] == 1.9
+
+
+def test_snapshot_without_compaction_keeps_every_row(tmp_path):
+    hist = tmp_path / "hist.csv"
+    for hours in (0, 5):
+        snapshot(tmp_path / "a.csv", hist, now=NOW + pd.Timedelta(hours=hours), payload=_payload(), compact=False)
+    assert len(pd.read_csv(hist)) == 4
 
 
 def test_closing_lines_use_last_snapshot_before_kickoff(tmp_path):

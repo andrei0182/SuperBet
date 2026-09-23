@@ -205,7 +205,23 @@ def accuracy_summary_html() -> str:
     )
 
 
-def build_email_body(matched: pd.DataFrame, unmatched_count: int, date_str: str) -> str:
+def closing_line_html(history_path: str | None) -> str:
+    """Past picks vs Pinnacle's closing Over 2.5 line (needs the snapshot history from the value-data branch)."""
+    if not history_path or not Path(history_path).exists() or not Path(LOG_PATH).exists():
+        return ""
+    try:
+        from superbet.over_clv import over_closing, over_closing_html
+        from superbet.pinnacle import closing_lines
+
+        checked = over_closing(pd.read_csv(LOG_PATH, dtype=str), closing_lines(history_path))
+        return over_closing_html(checked)
+    except Exception as exc:  # the recommendation email must never fail because of this extra section
+        print(f"Closing-line section skipped: {exc}")
+        return ""
+
+
+def build_email_body(matched: pd.DataFrame, unmatched_count: int, date_str: str,
+                     closing_history: str | None = None) -> str:
     lines = []
     lines.append(f"<h2>Recomandari zilnice -- {date_str}</h2>")
     lines.append(
@@ -249,6 +265,7 @@ def build_email_body(matched: pd.DataFrame, unmatched_count: int, date_str: str)
         )
 
     lines.append(accuracy_summary_html())
+    lines.append(closing_line_html(closing_history))
 
     return "\n".join(lines)
 
@@ -274,6 +291,8 @@ def main() -> None:
     parser.add_argument("--bet-xlsx", required=True, help="Path to BetExplorer's output/matches.xlsx")
     parser.add_argument("--superbet-xlsx", required=True, help="Path to SuperBet's output/matches.xlsx")
     parser.add_argument("--date", required=True, help="YYYY-MM-DD, used in the email subject/heading")
+    parser.add_argument("--closing-history", default=None,
+                        help="Pinnacle snapshot history (value-data branch) to show past picks vs the closing line")
     parser.add_argument("--dry-run", action="store_true", help="Print the email instead of sending it")
     args = parser.parse_args()
 
@@ -287,7 +306,7 @@ def main() -> None:
         for name in unmatched_names:
             print(f"  - {name}")
 
-    body = build_email_body(matched, unmatched_count, args.date)
+    body = build_email_body(matched, unmatched_count, args.date, args.closing_history)
     subject = f"Recomandari zilnice ({len(matched)} meciuri) -- {args.date}"
 
     if args.dry_run:

@@ -73,9 +73,13 @@ def _pick_odds(raw: pd.DataFrame, odds_source: str) -> pd.DataFrame:
     return out
 
 
-def clean_frame(raw: pd.DataFrame, odds_source: str = "B365", league: str | None = None) -> pd.DataFrame:
-    """Convert one raw football-data frame into the standard schema."""
-    required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
+def clean_frame(raw: pd.DataFrame, odds_source: str = "B365", league: str | None = None,
+                require_scores: bool = True) -> pd.DataFrame:
+    """Convert one raw football-data frame into the standard schema.
+
+    With `require_scores=False` (fixtures) rows without a score are kept.
+    """
+    required = {"Date", "HomeTeam", "AwayTeam"} | ({"FTHG", "FTAG"} if require_scores else set())
     missing = required - set(raw.columns)
     if missing:
         raise ValueError(f"missing columns: {sorted(missing)}")
@@ -84,14 +88,16 @@ def clean_frame(raw: pd.DataFrame, odds_source: str = "B365", league: str | None
         "league": raw["Div"].astype(str) if "Div" in raw.columns else (league or "UNK"),
         "home": raw["HomeTeam"].map(normalize_team),
         "away": raw["AwayTeam"].map(normalize_team),
-        "hg": pd.to_numeric(raw["FTHG"], errors="coerce"),
-        "ag": pd.to_numeric(raw["FTAG"], errors="coerce"),
+        "hg": pd.to_numeric(raw["FTHG"], errors="coerce") if "FTHG" in raw.columns else np.nan,
+        "ag": pd.to_numeric(raw["FTAG"], errors="coerce") if "FTAG" in raw.columns else np.nan,
     })
     df = pd.concat([df, _pick_odds(raw, odds_source)], axis=1)
     for target, name in CLOSING_COLUMNS.items():
         df[target] = pd.to_numeric(raw[name], errors="coerce") if name in raw.columns else np.nan
-    df = df.dropna(subset=["date", "hg", "ag"])
     df = df[(df["home"] != "nan") & (df["away"] != "nan")]
+    if not require_scores:
+        return df.dropna(subset=["date"])[OUTPUT_COLUMNS]
+    df = df.dropna(subset=["date", "hg", "ag"])
     df["hg"] = df["hg"].astype(int)
     df["ag"] = df["ag"].astype(int)
     return df[OUTPUT_COLUMNS]
@@ -105,8 +111,20 @@ def load_matches(data_dir: str | Path, odds_source: str = "B365") -> pd.DataFram
         raise FileNotFoundError(f"no CSV files in {data_dir}")
     frames = [clean_frame(_read_csv(p), odds_source, league=p.stem.split("_")[0]) for p in files]
     df = pd.concat(frames, ignore_index=True)
-    df = df.drop_duplicates(subset=["date", "home", "away"], keep="last")
+    df = df.drop_duplicates(subset=["date", "league", "home", "away"], keep="last")
     return df.sort_values(["date", "league", "home"], kind="stable").reset_index(drop=True)
+
+
+def load_fixtures(path: str | Path, odds_source: str = "B365") -> pd.DataFrame:
+    """Load upcoming fixtures (Date, HomeTeam, AwayTeam, optional Div and odds columns)."""
+    raw = _read_csv(Path(path))
+    df = clean_frame(raw, odds_source, league="UNK", require_scores=False)
+    if "Div" not in raw.columns:
+        df["league"] = None
+    df = df.drop(columns=["hg", "ag"])
+    for name, col in (("odds_gg", "gg_yes"), ("odds_ng", "gg_no")):
+        df[name] = pd.to_numeric(raw.loc[df.index, col], errors="coerce") if col in raw.columns else np.nan
+    return df.reset_index(drop=True)
 
 
 def load_btts(path: str | Path) -> pd.DataFrame | None:

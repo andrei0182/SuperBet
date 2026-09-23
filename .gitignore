@@ -10,3 +10,11 @@ debug_*.py
 chromedriver.log
 run_log*.txt
 run_final*.txt
+
+# Model package: raw data and outputs are never committed
+data/
+outputs/
+*.egg-info/
+.pytest_cache/
+# the model's pytest suite lives in tests/ and must be committed
+!tests/test_*.py

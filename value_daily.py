@@ -12,7 +12,7 @@ import argparse
 import pandas as pd
 
 from daily_recommendations import send_email
-from superbet.daily import email_html, run_daily, weekly_html
+from superbet.daily import email_html, range_email_html, run_daily, run_range, weekly_html
 from superbet.staking import StakingConfig
 
 
@@ -24,6 +24,10 @@ def main() -> None:
     parser.add_argument("--team-map", default="team_map.csv", help="Optional CSV superbet_name,name")
     parser.add_argument("--ev-min", type=float, default=0.02)
     parser.add_argument("--bankroll", type=float, default=1000.0)
+    parser.add_argument("--end", default=None,
+                        help="Last date of a multi-day run (--date is the first); Superbet files are read from "
+                             "--superbet-pattern, one per day")
+    parser.add_argument("--superbet-pattern", default="output/matches_{date}.xlsx")
     parser.add_argument("--weekly", action="store_true",
                         help="Send the weekly summary for the 7 days before --date instead of the daily report")
     parser.add_argument("--dry-run", action="store_true", help="Print the email instead of sending it")
@@ -44,6 +48,21 @@ def main() -> None:
         team_map = dict(zip(m["superbet_name"], m["name"]))
     except FileNotFoundError:
         pass
+    if args.end:
+        dates = [d.strftime("%Y-%m-%d") for d in pd.date_range(args.date, args.end)]
+        files = {d: args.superbet_pattern.format(date=d) for d in dates}
+        results = run_range(dates, files, args.state_dir, StakingConfig(ev_min=args.ev_min, bankroll=args.bankroll),
+                            args.ev_min, team_map=team_map)
+        subject, body = range_email_html(results)
+        print(subject)
+        for d, r in results.items():
+            print(f"{d}: {r.compared} comparate, {len(r.unmatched)} nepotrivite, {len(r.bets)} pariuri")
+        if args.dry_run:
+            print(body)
+        else:
+            send_email(subject, body)
+        return
+
     result = run_daily(args.date, args.superbet_xlsx, args.state_dir, StakingConfig(ev_min=args.ev_min,
                        bankroll=args.bankroll), args.ev_min, team_map=team_map)
     body = email_html(result, args.date)

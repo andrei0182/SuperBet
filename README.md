@@ -166,6 +166,10 @@ care nu se potrivesc automat. Rulare manuală: tab-ul Actions → workflow → *
 `python value_daily.py --date 2026-09-24 --dry-run` (tipărește emailul în loc să-l trimită);
 `python value_daily.py --weekly --date 2026-09-28 --dry-run` pentru rezumatul săptămânii 21–27.09.
 Rezumatul se poate cere oricând din Actions → Run workflow → bifa „Trimite și rezumatul săptămânal”.
+Pentru mai multe zile deodată (ex. oferta din weekend): Run workflow cu „Interval: prima zi” și „ultima zi”
+completate → o captură Pinnacle, scraper Superbet pentru fiecare zi, un singur email cu tabelul pe zile și toate
+pariurile; local: `python value_daily.py --date 2026-09-23 --end 2026-09-27 --dry-run` (fișierele Superbet în
+`output/matches_<data>.xlsx`).
 
 Secrete necesare (Settings → Secrets and variables → Actions): `PINNAPI_KEY` plus cele existente
 `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `EMAIL_TO`. Fără `PINNAPI_KEY`, ambele workflow-uri se opresc cu un

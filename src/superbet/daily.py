@@ -28,19 +28,38 @@ def run_daily(date: str, superbet_xlsx: str | Path, state_dir: str | Path, staki
               ev_min: float = 0.02, max_odds: float = 8.0, team_map: dict[str, str] | None = None,
               payload: dict | None = None) -> DailyResult:
     """Snapshot Pinnacle, compare with Superbet for `date`, log new value bets, settle the log on closing lines."""
+    return run_range([date], {date: superbet_xlsx}, state_dir, staking, ev_min, max_odds, team_map, payload)[date]
+
+
+def run_range(dates: list[str], superbet_xlsx: dict[str, str | Path], state_dir: str | Path, staking: StakingConfig,
+              ev_min: float = 0.02, max_odds: float = 8.0, team_map: dict[str, str] | None = None,
+              payload: dict | None = None) -> dict[str, DailyResult]:
+    """One Pinnacle snapshot covering every date, then the daily comparison for each date (one Superbet file each)."""
     state = Path(state_dir)
-    sharp_path, history, log_path = state / "sharp.csv", state / "pinnacle_snapshots.csv", state / "value_log.csv"
-    snapshot(sharp_path, history, payload=payload)
-    joined, unmatched = join_sources(load_odds_table(sharp_path), load_superbet_excel(superbet_xlsx, date), team_map)
+    sharp_path = state / "sharp.csv"
+    today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    days = max(3, (pd.Timestamp(max(dates)) - today).days + 2)
+    snapshot(sharp_path, state / "pinnacle_snapshots.csv", days=days, payload=payload)
+    sharp = load_odds_table(sharp_path)
+    out = {d: _compare_day(d, sharp, superbet_xlsx[d], state, staking, ev_min, max_odds, team_map) for d in dates}
+    settled = settle_log(state)
+    summary = summarize(settled) if settled is not None else {}
+    for res in out.values():
+        res.summary = summary
+    return out
+
+
+def _compare_day(date: str, sharp: pd.DataFrame, superbet_xlsx: str | Path, state: Path, staking: StakingConfig,
+                 ev_min: float, max_odds: float, team_map: dict[str, str] | None) -> DailyResult:
+    """Superbet vs Pinnacle for one date: log value bets and record the day's counts."""
+    joined, unmatched = join_sources(sharp, load_superbet_excel(superbet_xlsx, date), team_map)
     joined = joined[joined["date"] == pd.Timestamp(date)]
     compared = int(joined["SBH"].notna().sum())
     bets = find_value(joined, ["SB"], staking, ev_min, max_odds)
     if not bets.empty:
-        append_log(bets, log_path)
+        append_log(bets, state / "value_log.csv")
     record_day(state, date, compared, len(unmatched), len(bets))
-    settled = settle_log(state)
-    summary = summarize(settled) if settled is not None else {}
-    return DailyResult(bets, compared, unmatched, summary)
+    return DailyResult(bets, compared, unmatched, {})
 
 
 def record_day(state: Path, date: str, compared: int, unmatched: int, bets: int) -> None:
@@ -110,6 +129,34 @@ def weekly_html(state_dir: str | Path, end: str) -> tuple[str, str]:
     parts.append("<p style='color:#666'>Profitul pe o săptămână e aproape numai zgomot; contează EV-ul la închidere "
                  "pe sute de pariuri. Pariază doar sume pe care îți permiți să le pierzi.</p>")
     subject = f"Rezumat saptamanal value bets ({len(week)} pariuri) -- {start_ts:%d.%m}-{end_ts - pd.Timedelta(days=1):%d.%m.%Y}"
+    return subject, "\n".join(parts)
+
+
+def range_email_html(results: dict[str, DailyResult]) -> tuple[str, str]:
+    """Subject and HTML for a multi-day run: counts per day, every value bet found, running record."""
+    e = html.escape
+    dates = sorted(results)
+    bets = pd.concat([r.bets for r in results.values() if not r.bets.empty] or [pd.DataFrame()], ignore_index=True)
+    compared = sum(r.compared for r in results.values())
+    period = f"{pd.Timestamp(dates[0]):%d.%m} &ndash; {pd.Timestamp(dates[-1]):%d.%m.%Y}"
+    weekday = ["Lu", "Ma", "Mi", "Jo", "Vi", "Sâ", "Du"]
+    day_rows = "".join(f"<tr><td>{weekday[pd.Timestamp(d).weekday()]} {pd.Timestamp(d):%d.%m}</td><td>{results[d].compared}</td>"
+                       f"<td>{len(results[d].unmatched)}</td><td>{len(results[d].bets)}</td></tr>" for d in dates)
+    parts = [f"<h2>Value bets Superbet vs Pinnacle &mdash; {period}</h2>",
+             f"<p>Meciuri comparate: {compared} &middot; pariuri cu valoare: <b>{len(bets)}</b>.</p>",
+             "<table border='1' cellpadding='4' cellspacing='0'><tr><th>Zi</th><th>Comparate</th>"
+             f"<th>Nepotrivite pe Pinnacle</th><th>Pariuri</th></tr>{day_rows}</table>"]
+    if not bets.empty:
+        rows = "".join(
+            f"<tr><td>{r.date:%d.%m}</td><td>{e(r.home)} &ndash; {e(r.away)}</td><td>{e(str(r.selection))}</td>"
+            f"<td>{r.odds:.2f}</td><td>{r.fair_odds:.2f}</td><td>{r.ev * 100:+.1f}%</td><td>{r.stake:.2f}</td></tr>"
+            for r in bets.sort_values(["date", "ev"], ascending=[True, False]).itertuples())
+        parts.append("<h3>Pariuri</h3><table border='1' cellpadding='4' cellspacing='0'><tr><th>Data</th><th>Meci</th>"
+                     "<th>Pariu</th><th>Cota Superbet</th><th>Cota corectă (Pinnacle)</th><th>EV</th>"
+                     f"<th>Miză sugerată</th></tr>{rows}</table>")
+    parts.append("<p style='color:#666'>Cotele pentru zilele următoare se mai mișcă până la start; raportul zilnic "
+                 "le reverifică. Estimare, nu garanție. Pariază doar sume pe care îți permiți să le pierzi.</p>")
+    subject = f"Value bets ({len(bets)}) -- {pd.Timestamp(dates[0]):%d.%m}-{pd.Timestamp(dates[-1]):%d.%m.%Y}"
     return subject, "\n".join(parts)
 
 

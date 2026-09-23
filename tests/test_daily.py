@@ -73,3 +73,30 @@ def test_weekly_with_empty_state(tmp_path):
 
     subject, html = weekly_html(tmp_path, "2026-09-28")
     assert "Încă niciun pariu" in html
+
+
+def test_run_range_one_snapshot_many_days(tmp_path, monkeypatch):
+    from superbet.daily import range_email_html, run_range
+
+    day1, day2 = tmp_path / "d1.xlsx", tmp_path / "d2.xlsx"
+    _superbet(day1)
+    pd.DataFrame({"League": ["x"], "Home Team": ["Leeds"], "Away Team": ["Hull"], "Odds 1": [1.45], "Odds X": [4.0],
+                  "Odds 2": [6.5], "O/U Line": [2.5], "Odds Over": [1.9], "Odds Under": [1.9]}).to_excel(day2, index=False)
+    payload = _payload(2.0)
+    payload["events"].append(_event(3, "Leeds", "Hull", "2026-09-27T14:00:00Z", (1.5, 4.2, 7.0)))
+    monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW)
+    calls = []
+    import superbet.daily as daily
+    real = daily.snapshot
+    monkeypatch.setattr(daily, "snapshot", lambda *a, **k: calls.append(k) or real(*a, **k))
+
+    res = run_range(["2026-09-26", "2026-09-27"], {"2026-09-26": day1, "2026-09-27": day2},
+                    tmp_path / "state", StakingConfig(), payload=payload)
+    assert len(calls) == 1 and calls[0]["days"] >= 3
+    assert res["2026-09-26"].compared == 2 and len(res["2026-09-26"].bets) == 1
+    assert res["2026-09-27"].compared == 1 and res["2026-09-27"].bets.empty  # 1.45 at Superbet < fair 1.53
+    stats = pd.read_csv(tmp_path / "state" / "daily_stats.csv")
+    assert stats["date"].tolist() == ["2026-09-26", "2026-09-27"]
+    subject, html = range_email_html(res)
+    assert subject.startswith("Value bets (1) -- 26.09-27.09.2026")
+    assert "Arsenal" in html and "Comparate" in html

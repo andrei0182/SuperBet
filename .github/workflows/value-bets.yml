@@ -16,6 +16,14 @@ on:
     - cron: "0 7 * * *"
   workflow_dispatch:
     inputs:
+      start_date:
+        description: "Interval: prima zi (YYYY-MM-DD). Gol = doar azi"
+        type: string
+        default: ""
+      end_date:
+        description: "Interval: ultima zi (YYYY-MM-DD)"
+        type: string
+        default: ""
       weekly:
         description: "Trimite și rezumatul săptămânal (altfel doar lunea)"
         type: boolean
@@ -76,11 +84,27 @@ jobs:
         run: echo "value=$(TZ='Europe/Bucharest' date +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Scrape Superbet (today, with Over/Under)
-        if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true'
+        if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true' && inputs.start_date == ''
         run: python main.py --date ${{ steps.date.outputs.value }} --all --with-stats
 
+      - name: Date range run (manual)
+        if: env.PINNAPI_KEY != '' && inputs.start_date != ''
+        env:
+          START: ${{ inputs.start_date }}
+          END: ${{ inputs.end_date || inputs.start_date }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          d="$START"
+          while [ "$(date -d "$d" +%F)" \< "$(date -d "$END + 1 day" +%F)" ]; do
+            python main.py --date "$d" --all --with-stats --output "output/matches_$d.xlsx"
+            d=$(date -d "$d + 1 day" +%F)
+          done
+          python value_daily.py --date "$START" --end "$END" --state-dir state
+
       - name: Find value bets and email the report
-        if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true'
+        if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true' && inputs.start_date == ''
         env:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}

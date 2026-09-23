@@ -12,7 +12,7 @@ import argparse
 import pandas as pd
 
 from daily_recommendations import send_email
-from superbet.daily import email_html, run_daily
+from superbet.daily import email_html, run_daily, weekly_html
 from superbet.staking import StakingConfig
 
 
@@ -24,8 +24,19 @@ def main() -> None:
     parser.add_argument("--team-map", default="team_map.csv", help="Optional CSV superbet_name,name")
     parser.add_argument("--ev-min", type=float, default=0.02)
     parser.add_argument("--bankroll", type=float, default=1000.0)
+    parser.add_argument("--weekly", action="store_true",
+                        help="Send the weekly summary for the 7 days before --date instead of the daily report")
     parser.add_argument("--dry-run", action="store_true", help="Print the email instead of sending it")
     args = parser.parse_args()
+
+    if args.weekly:
+        subject, body = weekly_html(args.state_dir, args.date)
+        print(subject)
+        if args.dry_run:
+            print(body)
+        else:
+            send_email(subject, body)
+        return
 
     team_map = None
     try:

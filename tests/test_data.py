@@ -21,7 +21,7 @@ def test_load_matches_cleans_and_sorts(tmp_path):
     _write_csv(tmp_path / "E0_2324.csv", [
         {"Div": "E0", "Date": "20/08/2023", "HomeTeam": "B", "AwayTeam": "A", "FTHG": 1, "FTAG": 1,
          "B365H": 2.0, "B365D": 3.4, "B365A": 3.8, "B365>2.5": 1.9, "B365<2.5": 1.95,
-         "PSCH": 2.05, "PSCD": 3.3, "PSCA": 3.9},
+         "PSCH": 2.05, "PSCD": 3.3, "PSCA": 3.9, "PC>2.5": 0, "PC<2.5": 0},
         {"Div": "E0", "Date": "12/08/23", "HomeTeam": " A ", "AwayTeam": "B", "FTHG": 2, "FTAG": 0,
          "B365H": np.nan, "AvgH": 1.8, "B365D": 3.5, "B365A": 4.5},
         {"Div": "E0", "Date": "27/08/2023", "HomeTeam": "A", "AwayTeam": "C", "FTHG": np.nan, "FTAG": np.nan},
@@ -35,7 +35,8 @@ def test_load_matches_cleans_and_sorts(tmp_path):
     assert df.iloc[0]["home"] == "A"
     assert df.iloc[0]["odds_h"] == 1.8  # fallback to Avg when B365 missing
     assert df.iloc[1]["close_h"] == 2.05
-    assert np.isnan(df.iloc[1]["close_over"])  # column absent in file
+    assert np.isnan(df.iloc[1]["close_over"])  # 0 in the file means missing
+    assert np.isnan(df.iloc[0]["close_over"])  # column value absent
 
     merged = attach_btts(df, load_btts(tmp_path / "btts_odds.csv"))
     assert merged.iloc[1]["odds_gg"] == 1.7

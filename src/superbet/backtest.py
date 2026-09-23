@@ -142,7 +142,7 @@ def candidate_bets(preds: pd.DataFrame, market: str, prob_prefix: str, cfg: Back
     odds = rows[spec["odds"]].to_numpy(dtype=float)
     idx, ev = best_outcome(p, odds, cfg.staking.ev_min)
     take = idx >= 0
-    rows, idx, ev = rows[take], idx[take], ev[take]
+    rows, p, odds, idx, ev = rows[take], p[take], odds[take], idx[take], ev[take]
     r = np.arange(len(rows))
     close = rows[spec["close"]].to_numpy(dtype=float)[r, idx] if spec["close"] else np.full(len(rows), np.nan)
     return pd.DataFrame({

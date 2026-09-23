@@ -72,6 +72,16 @@ def test_run_backtest_end_to_end(data_dir, tmp_path):
     assert saved["betting"]["n_bets"] == summary["betting"]["n_bets"]
     bets = pd.read_csv(tmp_path / "bets.csv", parse_dates=["date"])
     assert (bets["date"] >= start).all()
+    # each bet carries the odds and probability of its own match and selection
+    preds = pd.read_csv(tmp_path / "predictions.csv", parse_dates=["date"])
+    odds_col = {"1": "odds_h", "X": "odds_d", "2": "odds_a", "Over 2.5": "odds_over", "Under 2.5": "odds_under"}
+    prob_col = {"1": "f_h", "X": "f_d", "2": "f_a", "Over 2.5": "f_over", "Under 2.5": "f_under"}
+    merged = bets.merge(preds, on=["date", "home", "away"])
+    assert len(merged) == len(bets) and len(bets) > 0
+    for _, row in merged.iterrows():
+        assert row["odds"] == pytest.approx(row[odds_col[row["selection"]]])
+        assert row["p"] == pytest.approx(row[prob_col[row["selection"]]])
+        assert row["p"] * row["odds"] - 1 >= 0.03 - 1e-9
     q = summary["probability_quality"]["1x2"]
     assert "model_beats_market" in q and "verdict" in q
     assert summary["btts_backtested"] is False

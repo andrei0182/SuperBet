@@ -68,7 +68,9 @@ jobs:
       - name: Install SuperBet dependencies
         if: env.SKIP_RUN != 'true'
         working-directory: SuperBet
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
 
       - name: Compute today's date
         if: env.SKIP_RUN != 'true'
@@ -109,10 +111,14 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: |
+          # Pinnacle closing lines for past picks (kept by the value-bets workflows on the value-data branch)
+          git fetch -q --depth 1 origin value-data && git show FETCH_HEAD:pinnacle_snapshots.csv > ../pinnacle_snapshots.csv \
+            || echo "No Pinnacle snapshot history yet."
           python daily_recommendations.py \
             --bet-xlsx ../bet/output/matches.xlsx \
             --superbet-xlsx output/matches.xlsx \
-            --date ${{ steps.date.outputs.value }}
+            --date ${{ steps.date.outputs.value }} \
+            --closing-history ../pinnacle_snapshots.csv
 
       - name: Commit updated results log and run marker
         if: env.SKIP_RUN != 'true'

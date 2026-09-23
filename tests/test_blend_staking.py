@@ -23,6 +23,10 @@ def test_devig_power_sums_to_one_and_shifts_to_favourite():
     assert devig(odds[:1], "power")[0, 2] < devig(odds[:1], "proportional")[0, 2]
 
 
+def test_devig_power_empty_input():
+    assert devig_power(np.empty((0, 3))).shape == (0, 3)
+
+
 def test_logit_clips():
     assert np.isfinite(logit(np.array([0.0, 1.0]))).all()
 

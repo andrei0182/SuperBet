@@ -43,3 +43,33 @@ def test_email_without_bets():
     from superbet.daily import DailyResult
     html = email_html(DailyResult(pd.DataFrame(), 0, pd.DataFrame(), {}), "2026-09-26")
     assert "Niciun pariu" in html
+
+
+def test_daily_stats_and_weekly_summary(tmp_path, monkeypatch):
+    from superbet.daily import weekly_html
+
+    xlsx = tmp_path / "matches.xlsx"
+    _superbet(xlsx)
+    state = tmp_path / "state"
+    monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW)
+    run_daily("2026-09-26", xlsx, state, StakingConfig(), payload=_payload(2.0))
+    run_daily("2026-09-26", xlsx, state, StakingConfig(), payload=_payload(2.0))  # re-run replaces the day
+    stats = pd.read_csv(state / "daily_stats.csv")
+    assert stats.to_dict("records") == [{"date": "2026-09-26", "compared": 2, "unmatched": 1, "bets": 1}]
+    monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW + pd.Timedelta(hours=20))
+    run_daily("2026-09-27", xlsx, state, StakingConfig(), payload=_payload(1.9))
+
+    subject, html = weekly_html(state, "2026-09-28")  # covers 21.09 - 27.09
+    assert "(1 pariuri)" in subject and "21.09-27.09.2026" in subject
+    assert "Zile rulate: 2 din 7" in html and "Arsenal" in html and "De la început" in html
+    assert "1.90" in html  # Pinnacle closing odds shown for the bet
+
+    subject, html = weekly_html(state, "2026-10-12")  # a later week without bets
+    assert "(0 pariuri)" in subject and "Zile rulate: 0 din 7" in html and "De la început" in html
+
+
+def test_weekly_with_empty_state(tmp_path):
+    from superbet.daily import weekly_html
+
+    subject, html = weekly_html(tmp_path, "2026-09-28")
+    assert "Încă niciun pariu" in html

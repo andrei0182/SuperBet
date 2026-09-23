@@ -2,6 +2,7 @@ name: Daily value bets (Superbet vs Pinnacle)
 
 # Once a day: scrape Superbet for today, compare with Pinnacle's no-vig price, log bets with
 # EV >= 2%, settle past bets against their closing lines and email the report.
+# On Mondays it also emails a weekly summary of the previous 7 days.
 # Needs secrets PINNAPI_KEY, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, EMAIL_TO.
 
 permissions:
@@ -13,7 +14,12 @@ on:
     # GitHub may fire scheduled runs late (see daily-recommendations.yml).
     - cron: "0 6 * * *"
     - cron: "0 7 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      weekly:
+        description: "Trimite și rezumatul săptămânal (altfel doar lunea)"
+        type: boolean
+        default: false
 
 concurrency:
   group: value-data
@@ -83,6 +89,20 @@ jobs:
           python value_daily.py --date ${{ steps.date.outputs.value }} \
             --superbet-xlsx output/matches.xlsx --state-dir state
           echo "${{ steps.date.outputs.value }}" > state/.last_value_date
+
+      - name: Weekly summary (Mondays, or on demand)
+        if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true'
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          FORCE_WEEKLY: ${{ inputs.weekly }}
+        run: |
+          if [ "$(TZ=Europe/Bucharest date +%u)" = "1" ] || [ "$FORCE_WEEKLY" = "true" ]; then
+            python value_daily.py --weekly --date ${{ steps.date.outputs.value }} --state-dir state
+          else
+            echo "Not Monday -- no weekly summary."
+          fi
 
       - name: Commit state
         if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true'

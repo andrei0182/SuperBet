@@ -120,16 +120,38 @@ def value(
     typer.echo(f"\n{len(bets)} pariuri adăugate în {log}")
 
 
+@app.command("pinnacle-snapshot")
+def pinnacle_snapshot(
+    out: Path = typer.Option(Path("outputs/sharp.csv"), help="Current Pinnacle prices, input for `superbet value --odds`."),
+    history: Path | None = typer.Option(Path("outputs/pinnacle_snapshots.csv"),
+                                        help="Every snapshot is appended here; the last one before kick-off is the closing line."),
+    days: int = typer.Option(3, help="Keep matches starting within this many days."),
+) -> None:
+    """Download Pinnacle prematch soccer odds from pinnapi.com (key in the PINNAPI_KEY environment variable)."""
+    from .pinnacle import snapshot
+
+    df = snapshot(out, history, days)
+    typer.echo(f"{len(df)} meciuri ({df['League'].nunique()} ligi) salvate în {out}"
+               + (f", adăugate în {history}" if history else ""))
+
+
 @app.command("value-settle")
 def value_settle(
     log: Path = typer.Option(Path("outputs/value_log.csv")),
-    results: Path = typer.Option(..., help="Results with FTHG,FTAG and closing PSCH/PSCD/PSCA, PC>2.5/PC<2.5."),
+    results: Path | None = typer.Option(None, help="Results with FTHG,FTAG (+ closing PSCH.. if no --closing-history)."),
+    closing_history: Path | None = typer.Option(None, help="pinnacle-snapshot history: closing = last snapshot before kick-off."),
     out: Path = typer.Option(Path("outputs/value_settled.csv")),
 ) -> None:
     """Settle logged bets and measure them against the Pinnacle closing line."""
+    from .pinnacle import attach_closing, closing_lines
     from .value import load_odds_table, read_log, settle, summarize
 
-    settled = settle(read_log(log), load_odds_table(results))
+    if results is None and closing_history is None:
+        raise typer.BadParameter("give --results and/or --closing-history")
+    res = load_odds_table(results) if results is not None else None
+    if closing_history is not None:
+        res = attach_closing(res, closing_lines(closing_history))
+    settled = settle(read_log(log), res)
     out.parent.mkdir(parents=True, exist_ok=True)
     settled.to_csv(out, index=False)
     typer.echo(format_value_summary(summarize(settled)))

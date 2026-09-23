@@ -51,6 +51,21 @@ def test_join_sources_matches_loose_names_and_reports_unmatched():
     assert unmatched["HomeTeam"].tolist() == ["Nobody"]
 
 
+def test_join_sources_romanian_countries_fuzzy_names_and_price_check():
+    sharp = pd.DataFrame({"date": pd.to_datetime(["2026-09-24"] * 3), "home": ["South Korea", "Amal Tiznit", "Caen"],
+                          "away": ["Ecuador", "Ittihad Tanger", "Rouen"], "PSH": [2.3, 3.15, 2.6],
+                          "PSD": [3.2, 3.0, 3.2], "PSA": [3.16, 2.36, 2.7]})
+    soft = pd.DataFrame({"Date": ["24/09/2026"] * 3,
+                         "HomeTeam": ["Coreea de Sud", "US Amal Tiznit", "Caen"],
+                         "AwayTeam": ["Ecuador", "Ittihad Riadi Tanger", "Rouen"],
+                         "SBH": [2.35, 2.95, 9.0], "SBD": [3.25, 3.1, 5.0], "SBA": [3.15, 2.5, 1.3]})
+    joined, unmatched = join_sources(sharp, soft)
+    assert joined["SBH"].tolist()[:2] == [2.35, 2.95]  # translated country name, fuzzy club names
+    assert np.isnan(joined["SBH"].iloc[2])  # same names but prices far apart: rejected as a wrong match
+    assert unmatched["HomeTeam"].tolist() == ["Caen"]
+    assert joined["matched_as"].iloc[0] == "Coreea de Sud - Ecuador"
+
+
 def test_load_superbet_excel(tmp_path):
     path = tmp_path / "matches.xlsx"
     pd.DataFrame({"League": ["X"], "Home Team": ["Arsenal"], "Away Team": ["Chelsea"], "Odds 1": [2.3],

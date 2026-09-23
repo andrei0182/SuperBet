@@ -123,14 +123,30 @@ fiecare an), profit realizat +4.0% ± 3.7% (neconcludent statistic).
 # test istoric pe fișierele football-data (cotele de dinainte de meci aleg pariul, închiderea îl judecă)
 superbet value-backtest --data data/raw --books B365,BW,WH,VC,IW,1XB --start 2022-08-01
 
-# zilnic: cote sharp (PSH,PSD,PSA,P>2.5,P<2.5) + cotele Superbet din scraper
-superbet value --odds sharp.csv --superbet-xlsx output/matches.xlsx --date 2026-09-24 \
+# zilnic: 1) cotele Pinnacle de la pinnapi.com (cheia în variabila de mediu PINNAPI_KEY, niciodată în repo)
+export PINNAPI_KEY=...            # sau secret în GitHub Actions
+superbet pinnacle-snapshot        # -> outputs/sharp.csv + adaugă în outputs/pinnacle_snapshots.csv
+# 2) cotele Superbet din scraper, apoi comparația
+python main.py --date 2026-09-24 --all --with-stats
+superbet value --odds outputs/sharp.csv --superbet-xlsx output/matches.xlsx --date 2026-09-24 \
     --team-map team_map.csv --ev-min 0.02 --bankroll 1000
 # -> pariurile cu valoare se adaugă în outputs/value_log.csv (se păstrează prima cotă văzută)
 
-# după meciuri: rezultate + cote de închidere Pinnacle (PSCH.., PC>2.5..)
-superbet value-settle --log outputs/value_log.csv --results results.csv
+# de mai multe ori pe zi (ultima captură înainte de start = linia de închidere)
+superbet pinnacle-snapshot
+
+# după meciuri: CLV și EV la închidere din capturi (+ scoruri, dacă ai un fișier de rezultate)
+superbet value-settle --log outputs/value_log.csv --closing-history outputs/pinnacle_snapshots.csv
 ```
+
+`pinnacle-snapshot` face o singură cerere REST pentru toate meciurile de fotbal (planul gratuit pinnapi are
+100/zi) și păstrează meciurile din următoarele `--days` zile (implicit 3), fără pseudo-meciurile de cornere.
+Linia de închidere e ultima captură făcută înainte de start, deci e cu atât mai exactă cu cât rulezi mai des.
+
+Potrivirea meciurilor Superbet ↔ Pinnacle: nume normalizate (fără diacritice și sufixe FC/SC…), numele
+românești ale naționalelor traduse (Japonia → Japan, Coreea de Sud → South Korea…), apoi potrivire aproximativă
+în aceeași zi. O pereche e respinsă dacă probabilitățile 1X2 ale celor două case diferă cu peste 15 puncte
+(aproape sigur alt meci). Coloana `matched_as` arată cu ce meci Superbet a fost împerecheat fiecare rând.
 
 `--odds` acceptă orice fișier în format football-data; casele „soft” se dau cu `--books` (coloanele
 `<cod>H/D/A`, `<cod>>2.5/<cod><2.5`). Cu `--superbet-xlsx`, cotele Superbet devin cartea `SB`; numele de echipe

@@ -29,12 +29,69 @@ KEY = ["date", "home", "away"]
 LOG_COLUMNS = KEY + ["market", "selection", "book", "odds", "fair_p", "fair_odds", "ev", "stake"]
 
 
+# Romanian spellings used by Superbet for national teams -> English (as in Pinnacle / football-data).
+RO_COUNTRIES = {
+    "japonia": "japan", "coreea de sud": "south korea", "coreea de nord": "north korea", "china": "china",
+    "noua zeelanda": "new zealand", "insulele maldive": "maldives", "insulele solomon": "solomon islands",
+    "insulele comore": "comoros", "insulele feroe": "faroe islands", "coasta de fildes": "ivory coast",
+    "camerun": "cameroon", "libia": "libya", "rd congo": "dr congo", "congo": "congo republic",
+    "guineea ecuatoriala": "equatorial guinea", "guineea": "guinea", "guineea bissau": "guinea bissau",
+    "republica centrafricana": "central african republic", "africa de sud": "south africa",
+    "eau": "united arab emirates", "emiratele arabe unite": "united arab emirates", "arabia saudita": "saudi arabia",
+    "iordania": "jordan", "siria": "syria", "irak": "iraq", "liban": "lebanon", "kuweit": "kuwait",
+    "tunisia": "tunisia", "algeria": "algeria", "maroc": "morocco", "egipt": "egypt", "etiopia": "ethiopia",
+    "olanda": "netherlands", "tarile de jos": "netherlands", "germania": "germany", "tara galilor": "wales",
+    "anglia": "england", "scotia": "scotland", "irlanda": "ireland", "irlanda de nord": "northern ireland",
+    "grecia": "greece", "danemarca": "denmark", "norvegia": "norway", "suedia": "sweden", "finlanda": "finland",
+    "islanda": "iceland", "lituania": "lithuania", "letonia": "latvia", "ungaria": "hungary", "belgia": "belgium",
+    "portugalia": "portugal", "spania": "spain", "franta": "france", "italia": "italy", "elvetia": "switzerland",
+    "polonia": "poland", "cehia": "czechia", "slovacia": "slovakia", "croatia": "croatia", "slovenia": "slovenia",
+    "bosnia si hertegovina": "bosnia and herzegovina", "muntenegru": "montenegro", "macedonia de nord":
+    "north macedonia", "albania": "albania", "turcia": "turkiye", "cipru": "cyprus", "moldova": "moldova",
+    "ucraina": "ukraine", "rusia": "russia", "belarus": "belarus", "georgia": "georgia", "armenia": "armenia",
+    "azerbaidjan": "azerbaijan", "kazahstan": "kazakhstan", "gibraltar": "gibraltar", "luxemburg": "luxembourg",
+    "statele unite": "usa", "sua": "usa", "mexic": "mexico", "canada": "canada", "brazilia": "brazil",
+    "columbia": "colombia", "peru": "peru", "antigua si barbuda": "antigua and barbuda",
+    "trinidad si tobago": "trinidad and tobago", "australia": "australia", "india": "india",
+}
+
+
 def team_key(name: object) -> str:
-    """Loose team key for joining sources: no accents, case, punctuation or club suffixes."""
+    """Loose team key for joining sources: no accents, case, punctuation or club suffixes; RO country names in English."""
     text = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode().lower()
     text = re.sub(r"[^a-z0-9 ]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = RO_COUNTRIES.get(text, text)
     text = re.sub(r"\b(fc|cf|afc|sc|ac|cd|fk|sk|as|ss|us|the)\b", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _similarity(a: str, b: str) -> float:
+    """Name similarity in [0, 1]: sequence ratio, or 1 when one name's words are all inside the other."""
+    from difflib import SequenceMatcher
+
+    wa, wb = set(a.split()), set(b.split())
+    if wa and wb and (wa <= wb or wb <= wa):
+        return 1.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _fuzzy_pairs(sharp: pd.DataFrame, soft: pd.DataFrame, threshold: float) -> dict[int, int]:
+    """Soft row -> sharp row for same-day fixtures whose home and away names are both similar enough."""
+    pairs, used = {}, set()
+    for i, row in soft.iterrows():
+        cand = sharp[sharp["date"] == row["date"]]
+        best, best_score = None, threshold
+        for j, c in cand.iterrows():
+            if j in used:
+                continue
+            score = min(_similarity(row["_h"], c["_h"]), _similarity(row["_a"], c["_a"]))
+            if score >= best_score:
+                best, best_score = j, score
+        if best is not None:
+            pairs[i] = best
+            used.add(best)
+    return pairs
 
 
 def _odds(df: pd.DataFrame, col: str) -> np.ndarray:
@@ -75,25 +132,48 @@ def load_superbet_excel(path: str | Path, date: str, book: str = "SB") -> pd.Dat
     })
 
 
-def join_sources(sharp: pd.DataFrame, soft: pd.DataFrame, team_map: dict[str, str] | None = None
+def join_sources(sharp: pd.DataFrame, soft: pd.DataFrame, team_map: dict[str, str] | None = None,
+                 book: str = "SB", fuzzy: float = 0.75, max_gap: float = 0.15
                  ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Attach soft-book columns to sharp rows by date + loose team names; returns (joined, unmatched soft rows).
+    """Attach soft-book columns to sharp rows by date + team names; returns (joined, unmatched soft rows).
 
+    Names are matched exactly (after `team_key`), then fuzzily on the same day. A pair is rejected
+    when the two books' de-vigged 1X2 probabilities differ by more than `max_gap` (likely a wrong match).
     `team_map` maps a soft-book team name to the sharp source's name for teams spelled differently.
     """
     team_map = {team_key(k): team_key(v) for k, v in (team_map or {}).items()}
     fix = lambda n: team_map.get(team_key(n), team_key(n))  # noqa: E731
-    soft = soft.copy()
+    soft = soft.copy().reset_index(drop=True)
     soft["date"] = parse_dates(soft["Date"].astype(str))
     soft["_h"], soft["_a"] = soft["HomeTeam"].map(fix), soft["AwayTeam"].map(fix)
-    sharp = sharp.assign(_h=sharp["home"].map(team_key), _a=sharp["away"].map(team_key))
+    sharp = sharp.reset_index(drop=True).assign(_h=sharp["home"].map(team_key).to_numpy(),
+                                                _a=sharp["away"].map(team_key).to_numpy())
     extra = [c for c in soft.columns if c not in ("Date", "HomeTeam", "AwayTeam", "date", "_h", "_a")]
-    joined = sharp.drop(columns=[c for c in extra if c in sharp.columns]).merge(
-        soft[["date", "_h", "_a"] + extra], on=["date", "_h", "_a"], how="left", indicator=True)
-    matched = joined.loc[joined["_merge"] == "both", ["date", "_h", "_a"]]
-    unmatched = soft.merge(matched, on=["date", "_h", "_a"], how="left", indicator=True)
-    unmatched = unmatched.loc[unmatched["_merge"] == "left_only", ["Date", "HomeTeam", "AwayTeam"]]
-    return joined.drop(columns=["_h", "_a", "_merge"]), unmatched.reset_index(drop=True)
+
+    exact = soft.reset_index().merge(sharp[["date", "_h", "_a"]].reset_index().rename(columns={"index": "j"}),
+                                     on=["date", "_h", "_a"])
+    pairs = dict(zip(exact["index"], exact["j"]))
+    rest = soft.drop(index=list(pairs))
+    pairs.update(_fuzzy_pairs(sharp.drop(index=list(pairs.values())), rest, fuzzy))
+
+    pairs = {i: j for i, j in pairs.items() if _prices_agree(sharp.loc[j], soft.loc[i], book, max_gap)}
+    joined = sharp.drop(columns=[c for c in extra if c in sharp.columns]).copy()
+    for c in extra:
+        joined[c] = np.nan
+    for i, j in pairs.items():
+        joined.loc[j, extra] = soft.loc[i, extra].to_numpy()
+    joined["matched_as"] = pd.Series({j: f"{soft.loc[i, 'HomeTeam']} - {soft.loc[i, 'AwayTeam']}" for i, j in pairs.items()})
+    unmatched = soft.drop(index=list(pairs))[["Date", "HomeTeam", "AwayTeam"]]
+    return joined.drop(columns=["_h", "_a"]), unmatched.reset_index(drop=True)
+
+
+def _prices_agree(sharp_row: pd.Series, soft_row: pd.Series, book: str, max_gap: float) -> bool:
+    """False when both books quote 1X2 and their fair probabilities are too far apart to be the same match."""
+    s = np.array([sharp_row.get(c, np.nan) for c in MARKETS["1x2"]["sharp"]], dtype=float)
+    o = np.array([soft_row.get(f"{book}{x}", np.nan) for x in MARKETS["1x2"]["suffixes"]], dtype=float)
+    if not (np.isfinite(s).all() and np.isfinite(o).all()):
+        return True
+    return float(np.max(np.abs(devig(s[None], "proportional") - devig(o[None], "proportional")))) <= max_gap
 
 
 def find_value(df: pd.DataFrame, books: list[str], staking: StakingConfig, ev_min: float = 0.02,
@@ -148,6 +228,7 @@ def settle(log: pd.DataFrame, results: pd.DataFrame, devig_method: str = "power"
     """Add result, profit and closing-line metrics (CLV, closing EV) from a results file with PSC* columns."""
     res = results.assign(_h=results["home"].map(team_key), _a=results["away"].map(team_key))
     log = log.assign(_h=log["home"].map(team_key), _a=log["away"].map(team_key))
+    res = res.assign(**{c: np.nan for c in ("FTHG", "FTAG") if c not in res})
     cols = ["date", "_h", "_a", "FTHG", "FTAG"] + [c for m in MARKETS.values() for c in m["close"] if c in res]
     merged = log.merge(res[cols].drop_duplicates(["date", "_h", "_a"]), on=["date", "_h", "_a"], how="left")
     hg = pd.to_numeric(merged["FTHG"], errors="coerce").to_numpy()

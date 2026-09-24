@@ -132,6 +132,22 @@ def weekly_html(state_dir: str | Path, end: str) -> tuple[str, str]:
     return subject, "\n".join(parts)
 
 
+def bets_table(bets: pd.DataFrame, with_date: bool) -> str:
+    """Value bets as an HTML table, in kick-off order, with the start time and league."""
+    e = html.escape
+    for col in ("kickoff", "league"):  # older log rows predate these columns
+        bets = bets.assign(**{col: bets[col].fillna("") if col in bets else ""})
+    head = (("<th>Data</th>" if with_date else "") + "<th>Ora</th><th>Liga</th><th>Meci</th><th>Pariu</th>"
+            "<th>Cota Superbet</th><th>Cota corectă (Pinnacle)</th><th>EV</th><th>Miză sugerată</th>")
+    rows = []
+    for r in bets.sort_values(["date", "kickoff", "ev"], ascending=[True, True, False]).itertuples():
+        cells = ([f"{r.date:%d.%m}"] if with_date else []) + [
+            e(str(r.kickoff)), e(str(r.league)), f"{e(r.home)} &ndash; {e(r.away)}", e(str(r.selection)),
+            f"{r.odds:.2f}", f"{r.fair_odds:.2f}", f"{r.ev * 100:+.1f}%", f"{r.stake:.2f}"]
+        rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+    return f"<table border='1' cellpadding='4' cellspacing='0'><tr>{head}</tr>{''.join(rows)}</table>"
+
+
 def range_email_html(results: dict[str, DailyResult]) -> tuple[str, str]:
     """Subject and HTML for a multi-day run: counts per day, every value bet found, running record."""
     e = html.escape
@@ -147,13 +163,7 @@ def range_email_html(results: dict[str, DailyResult]) -> tuple[str, str]:
              "<table border='1' cellpadding='4' cellspacing='0'><tr><th>Zi</th><th>Comparate</th>"
              f"<th>Nepotrivite pe Pinnacle</th><th>Pariuri</th></tr>{day_rows}</table>"]
     if not bets.empty:
-        rows = "".join(
-            f"<tr><td>{r.date:%d.%m}</td><td>{e(r.home)} &ndash; {e(r.away)}</td><td>{e(str(r.selection))}</td>"
-            f"<td>{r.odds:.2f}</td><td>{r.fair_odds:.2f}</td><td>{r.ev * 100:+.1f}%</td><td>{r.stake:.2f}</td></tr>"
-            for r in bets.sort_values(["date", "ev"], ascending=[True, False]).itertuples())
-        parts.append("<h3>Pariuri</h3><table border='1' cellpadding='4' cellspacing='0'><tr><th>Data</th><th>Meci</th>"
-                     "<th>Pariu</th><th>Cota Superbet</th><th>Cota corectă (Pinnacle)</th><th>EV</th>"
-                     f"<th>Miză sugerată</th></tr>{rows}</table>")
+        parts.append("<h3>Pariuri</h3>" + bets_table(bets, with_date=True))
     parts.append("<p style='color:#666'>Cotele pentru zilele următoare se mai mișcă până la start; raportul zilnic "
                  "le reverifică. Estimare, nu garanție. Pariază doar sume pe care îți permiți să le pierzi.</p>")
     subject = f"Value bets ({len(bets)}) -- {pd.Timestamp(dates[0]):%d.%m}-{pd.Timestamp(dates[-1]):%d.%m.%Y}"
@@ -172,13 +182,7 @@ def email_html(result: DailyResult, date: str) -> str:
     if result.bets.empty:
         parts.append("<p><b>Niciun pariu cu valoare azi.</b></p>")
     else:
-        rows = "".join(
-            f"<tr><td>{e(r.home)} &ndash; {e(r.away)}</td><td>{e(r.selection)}</td><td>{r.odds:.2f}</td>"
-            f"<td>{r.fair_odds:.2f}</td><td>{r.ev * 100:+.1f}%</td><td>{r.stake:.2f}</td></tr>"
-            for r in result.bets.itertuples())
-        parts.append("<table border='1' cellpadding='4' cellspacing='0'><tr><th>Meci</th><th>Pariu</th>"
-                     "<th>Cota Superbet</th><th>Cota corectă (Pinnacle)</th><th>EV</th><th>Miză sugerată</th></tr>"
-                     f"{rows}</table>")
+        parts.append(bets_table(result.bets, with_date=False))
     s = result.summary
     if s and s.get("with_closing_odds"):
         verdict = ("pozitiv: prețurile luate bat linia de închidere" if s["ev_close_se"] and

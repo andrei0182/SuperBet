@@ -30,6 +30,7 @@ def test_run_daily_logs_value_and_reports(tmp_path, monkeypatch):
     assert (state / "value_log.csv").exists() and (state / "pinnacle_snapshots.csv").exists()
     html = email_html(res, "2026-09-26")
     assert "Arsenal" in html and "Cota corectă" in html
+    assert "<td>17:00</td>" in html and "England - Premier League" in html  # 14:00 UTC = 17:00 Bucharest
 
     # a later snapshot (closer to kick-off) becomes the closing line for yesterday's bet
     monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW + pd.Timedelta(hours=20))
@@ -100,3 +101,12 @@ def test_run_range_one_snapshot_many_days(tmp_path, monkeypatch):
     subject, html = range_email_html(res)
     assert subject.startswith("Value bets (1) -- 26.09-27.09.2026")
     assert "Arsenal" in html and "Comparate" in html
+
+
+def test_bets_table_handles_rows_without_kickoff_or_league():
+    from superbet.daily import bets_table
+
+    old_row = pd.DataFrame([{"date": pd.Timestamp("2026-09-23"), "home": "A", "away": "B", "selection": "1",
+                             "odds": 2.2, "fair_odds": 2.0, "ev": 0.1, "stake": 20.0}])
+    html = bets_table(old_row, with_date=True)
+    assert "<th>Ora</th><th>Liga</th>" in html and "A &ndash; B" in html

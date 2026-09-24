@@ -26,7 +26,16 @@ MARKETS: dict[str, dict] = {
              "sharp": ["P>2.5", "P<2.5"], "close": ["PC>2.5", "PC<2.5"]},
 }
 KEY = ["date", "home", "away"]
-LOG_COLUMNS = KEY + ["market", "selection", "book", "odds", "fair_p", "fair_odds", "ev", "stake"]
+LOG_COLUMNS = KEY + ["market", "selection", "book", "odds", "fair_p", "fair_odds", "ev", "stake", "league", "kickoff"]
+LOCAL_TZ = "Europe/Bucharest"
+
+
+def _kickoff_local(df: pd.DataFrame) -> pd.Series:
+    """Local (Bucharest) HH:MM from the sharp table's UTC `starts`, empty when unknown."""
+    if "starts" not in df.columns:
+        return pd.Series("", index=df.index)
+    starts = pd.to_datetime(df["starts"], utc=True, errors="coerce", format="mixed")
+    return starts.dt.tz_convert(LOCAL_TZ).dt.strftime("%H:%M").fillna("")
 
 
 # Romanian spellings used by Superbet for national teams -> English (as in Pinnacle / football-data).
@@ -181,6 +190,7 @@ def find_value(df: pd.DataFrame, books: list[str], staking: StakingConfig, ev_mi
                markets: tuple[str, ...] = ("1x2", "ou25")) -> pd.DataFrame:
     """Best soft price per selection vs the de-vigged sharp price; keeps selections with EV >= ev_min."""
     out = []
+    kickoff = _kickoff_local(df).to_numpy()
     for market in markets:
         spec = MARKETS[market]
         sharp = np.column_stack([_odds(df, c) for c in spec["sharp"]])
@@ -201,6 +211,8 @@ def find_value(df: pd.DataFrame, books: list[str], staking: StakingConfig, ev_mi
             rows["odds"], rows["fair_p"] = odds[take], fair[take, k]
             rows["fair_odds"], rows["ev"] = 1 / fair[take, k], ev[take]
             rows["stake"] = stake_size(fair[take, k], odds[take], staking.bankroll, staking)
+            rows["league"] = df.loc[take, "League"].fillna("") if "League" in df.columns else ""
+            rows["kickoff"] = kickoff[take]
             out.append(rows)
     if not out:
         return pd.DataFrame(columns=LOG_COLUMNS)

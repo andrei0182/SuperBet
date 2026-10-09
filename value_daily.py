@@ -12,6 +12,7 @@ import argparse
 import pandas as pd
 
 from daily_recommendations import send_email
+from superbet.pinnacle import PinnapiUnavailable
 from superbet.daily import email_html, range_email_html, run_daily, run_range, weekly_html
 from superbet.staking import StakingConfig
 
@@ -51,8 +52,12 @@ def main() -> None:
     if args.end:
         dates = [d.strftime("%Y-%m-%d") for d in pd.date_range(args.date, args.end)]
         files = {d: args.superbet_pattern.format(date=d) for d in dates}
-        results = run_range(dates, files, args.state_dir, StakingConfig(ev_min=args.ev_min, bankroll=args.bankroll),
-                            args.ev_min, team_map=team_map)
+        try:
+            results = run_range(dates, files, args.state_dir, StakingConfig(ev_min=args.ev_min, bankroll=args.bankroll),
+                                args.ev_min, team_map=team_map)
+        except PinnapiUnavailable as exc:
+            print(f"::warning::Raport value bets sărit, pinnapi indisponibil: {exc}")
+            return
         subject, body = range_email_html(results)
         print(subject)
         for d, r in results.items():
@@ -63,8 +68,12 @@ def main() -> None:
             send_email(subject, body)
         return
 
-    result = run_daily(args.date, args.superbet_xlsx, args.state_dir, StakingConfig(ev_min=args.ev_min,
-                       bankroll=args.bankroll), args.ev_min, team_map=team_map)
+    try:
+        result = run_daily(args.date, args.superbet_xlsx, args.state_dir, StakingConfig(ev_min=args.ev_min,
+                           bankroll=args.bankroll), args.ev_min, team_map=team_map)
+    except PinnapiUnavailable as exc:
+        print(f"::warning::Raport value bets sărit, pinnapi indisponibil: {exc}")
+        return
     body = email_html(result, args.date)
     subject = f"Value bets ({len(result.bets)}) -- {args.date}"
     print(subject)

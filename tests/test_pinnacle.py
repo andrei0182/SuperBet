@@ -81,3 +81,32 @@ def test_api_key_required(monkeypatch):
     monkeypatch.delenv("PINNAPI_KEY", raising=False)
     with pytest.raises(RuntimeError):
         api_key()
+
+
+def test_fetch_prematch_raises_unavailable_on_suspended_account(monkeypatch):
+    import io
+    import urllib.error
+
+    from superbet.pinnacle import PinnapiUnavailable, fetch_prematch
+
+    def refuse(req, timeout=0):
+        body = io.BytesIO(b'{"error":"account_suspended","message":"This account is suspended"}')
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, body)
+
+    monkeypatch.setattr("urllib.request.urlopen", refuse)
+    with pytest.raises(PinnapiUnavailable, match="account_suspended"):
+        fetch_prematch("key")
+
+
+def test_cli_snapshot_does_not_fail_when_pinnapi_refuses(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from superbet.cli import app
+    from superbet.pinnacle import PinnapiUnavailable
+
+    def refuse(*a, **k):
+        raise PinnapiUnavailable("pinnapi HTTP 403 account_suspended")
+
+    monkeypatch.setattr("superbet.pinnacle.snapshot", refuse)
+    r = CliRunner().invoke(app, ["pinnacle-snapshot", "--out", str(tmp_path / "s.csv"), "--history", str(tmp_path / "h.csv")])
+    assert r.exit_code == 0 and "::warning::" in r.output

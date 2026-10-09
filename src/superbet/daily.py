@@ -37,11 +37,12 @@ def run_range(dates: list[str], superbet_xlsx: dict[str, str | Path], state_dir:
     """One Pinnacle snapshot covering every date, then the daily comparison for each date (one Superbet file each)."""
     state = Path(state_dir)
     sharp_path = state / "sharp.csv"
-    today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
-    days = max(3, (pd.Timestamp(max(dates)) - today).days + 2)
-    snapshot(sharp_path, state / "pinnacle_snapshots.csv", days=days, payload=payload)
+    now = pd.Timestamp.now(tz="UTC")
+    days = max(3, (pd.Timestamp(max(dates)) - now.tz_localize(None).normalize()).days + 2)
+    snapshot(sharp_path, state / "pinnacle_snapshots.csv", days=days, now=now, payload=payload)
     sharp = load_odds_table(sharp_path)
-    out = {d: _compare_day(d, sharp, superbet_xlsx[d], state, staking, ev_min, max_odds, team_map) for d in dates}
+    out = {d: _compare_day(d, sharp, superbet_xlsx[d], state, staking, ev_min, max_odds, team_map, now)
+           for d in dates}
     settled = settle_log(state)
     summary = summarize(settled) if settled is not None else {}
     for res in out.values():
@@ -50,12 +51,13 @@ def run_range(dates: list[str], superbet_xlsx: dict[str, str | Path], state_dir:
 
 
 def _compare_day(date: str, sharp: pd.DataFrame, superbet_xlsx: str | Path, state: Path, staking: StakingConfig,
-                 ev_min: float, max_odds: float, team_map: dict[str, str] | None) -> DailyResult:
-    """Superbet vs Pinnacle for one date: log value bets and record the day's counts."""
+                 ev_min: float, max_odds: float, team_map: dict[str, str] | None,
+                 logged_at: pd.Timestamp) -> DailyResult:
+    """Superbet vs Pinnacle for one date: log value bets (with the time they were found) and record the counts."""
     joined, unmatched = join_sources(sharp, load_superbet_excel(superbet_xlsx, date), team_map)
     joined = joined[joined["date"] == pd.Timestamp(date)]
     compared = int(joined["SBH"].notna().sum())
-    bets = find_value(joined, ["SB"], staking, ev_min, max_odds)
+    bets = find_value(joined, ["SB"], staking, ev_min, max_odds).assign(logged_at=logged_at.isoformat())
     if not bets.empty:
         append_log(bets, state / "value_log.csv")
     record_day(state, date, compared, len(unmatched), len(bets))
@@ -123,7 +125,8 @@ def weekly_html(state_dir: str | Path, end: str) -> tuple[str, str]:
                    else "încă neconcludent (prea puține pariuri sau fără avantaj)")
         parts.append(f"<h3>De la început: {s['bets']} pariuri ({s['with_closing_odds']} cu linie de închidere)</h3>"
                      f"<p>EV la închidere: <b>{_pct(s['ev_close_mean'])}</b> &plusmn; {_pct(s['ev_close_se'])} "
-                     f"&mdash; {verdict}. Pariuri cu CLV pozitiv: {_pct(s['clv_positive_share'])}.</p>")
+                     f"&mdash; {verdict}. Pariuri cu CLV pozitiv: {_pct(s['clv_positive_share'])}.</p>"
+                     + excluded_note(s))
     else:
         parts.append("<p>Încă niciun pariu în jurnal.</p>")
     parts.append("<p style='color:#666'>Profitul pe o săptămână e aproape numai zgomot; contează EV-ul la închidere "
@@ -170,6 +173,20 @@ def range_email_html(results: dict[str, DailyResult]) -> tuple[str, str]:
     return subject, "\n".join(parts)
 
 
+def excluded_note(s: dict) -> str:
+    """Bets left out of the closing-line record because their close could not be measured honestly."""
+    late, old = s.get("excluded_no_later_snapshot", 0), s.get("excluded_unmeasured", 0)
+    if not late and not old:
+        return ""
+    bits = []
+    if late:
+        bits.append(f"{late} fără nicio captură Pinnacle după pariu")
+    if old:
+        bits.append(f"{old} vechi, dinainte de înregistrarea orei pariului")
+    return (f"<p style='color:#888; font-size:0.9em;'>Excluse din bilanț ({', '.join(bits)}): pentru ele "
+            "linia de închidere nu se poate măsura corect.</p>")
+
+
 def _pct(v: float | None) -> str:
     return "-" if v is None else f"{v * 100:.1f}%"
 
@@ -189,7 +206,8 @@ def email_html(result: DailyResult, date: str) -> str:
                    s["ev_close_mean"] / s["ev_close_se"] > 2 else "încă neconcludent")
         parts.append(f"<h3>Bilanț (toate pariurile cu linie de închidere: {s['with_closing_odds']})</h3>"
                      f"<p>EV la închidere: <b>{_pct(s['ev_close_mean'])}</b> &plusmn; {_pct(s['ev_close_se'])} "
-                     f"({verdict}). Pariuri cu CLV pozitiv: {_pct(s['clv_positive_share'])}.</p>")
+                     f"({verdict}). Pariuri cu CLV pozitiv: {_pct(s['clv_positive_share'])}.</p>"
+                     + excluded_note(s))
     parts.append("<p style='color:#666'>Estimare, nu garanție. EV la închidere pozitiv, constant, pe sute de pariuri "
                  "e singurul semn credibil de avantaj. Pariază doar sume pe care îți permiți să le pierzi.</p>")
     return "\n".join(parts)

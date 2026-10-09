@@ -241,7 +241,10 @@ def settle(log: pd.DataFrame, results: pd.DataFrame, devig_method: str = "power"
     res = results.assign(_h=results["home"].map(team_key), _a=results["away"].map(team_key))
     log = log.assign(_h=log["home"].map(team_key), _a=log["away"].map(team_key))
     res = res.assign(**{c: np.nan for c in ("FTHG", "FTAG") if c not in res})
+    if "taken_at" in res:  # closing lines from the snapshot history carry the time they were taken
+        res = res.rename(columns={"taken_at": "close_taken_at"})
     cols = ["date", "_h", "_a", "FTHG", "FTAG"] + [c for m in MARKETS.values() for c in m["close"] if c in res]
+    cols += ["close_taken_at"] if "close_taken_at" in res else []
     merged = log.merge(res[cols].drop_duplicates(["date", "_h", "_a"]), on=["date", "_h", "_a"], how="left")
     hg = pd.to_numeric(merged["FTHG"], errors="coerce").to_numpy()
     ag = pd.to_numeric(merged["FTAG"], errors="coerce").to_numpy()
@@ -267,10 +270,38 @@ def settle(log: pd.DataFrame, results: pd.DataFrame, devig_method: str = "power"
     out["won"] = won
     out["profit"] = np.where(np.isnan(won), np.nan, np.where(won == 1, out["stake"] * (out["odds"] - 1), -out["stake"]))
     out["profit_flat"] = np.where(np.isnan(won), np.nan, np.where(won == 1, out["odds"] - 1, -1.0))
-    out["close_odds"] = close_odds
-    out["clv"] = out["odds"] / close_odds - 1
-    out["ev_close"] = out["odds"] * close_fair - 1
+    status = closing_status(out, close_odds)
+    valid = status == "ok"
+    out["closing_status"] = status
+    out["close_odds"] = np.where(valid, close_odds, np.nan)
+    out["clv"] = out["odds"] / out["close_odds"] - 1
+    out["ev_close"] = np.where(valid, out["odds"] * close_fair - 1, np.nan)
     return out
+
+
+MIN_CLOSING_GAP = pd.Timedelta(minutes=30)
+
+
+def closing_status(settled: pd.DataFrame, close_odds: np.ndarray) -> np.ndarray:
+    """Whether each bet's closing line really came after the bet.
+
+    "ok": a closing price exists and, when timing is known, was taken at least 30 minutes after the bet;
+    "fara_captura_ulterioara": the last pre-start snapshot is the one the bet was found in (no real close);
+    "nemasurat": closing from snapshots but the bet predates `logged_at` tracking (timing unknown);
+    "fara_inchidere": no closing price at all. Historical result files (no snapshot times) count as "ok".
+    """
+    has_close = np.isfinite(close_odds)
+    status = np.where(has_close, "ok", "fara_inchidere").astype(object)
+    if "close_taken_at" not in settled:
+        return status
+    taken = pd.to_datetime(settled["close_taken_at"], utc=True, errors="coerce", format="mixed")
+    logged = (pd.to_datetime(settled["logged_at"], utc=True, errors="coerce", format="mixed")
+              if "logged_at" in settled else pd.Series(pd.NaT, index=settled.index))
+    unknown = has_close & logged.isna().to_numpy()
+    too_early = has_close & ~unknown & (taken < logged + MIN_CLOSING_GAP).to_numpy()
+    status[unknown] = "nemasurat"
+    status[too_early] = "fara_captura_ulterioara"
+    return status
 
 
 def _mean_se(x: pd.Series) -> tuple[float | None, float | None]:
@@ -286,7 +317,10 @@ def summarize(settled: pd.DataFrame) -> dict:
     ev_close, ev_se = _mean_se(settled["ev_close"])
     flat, flat_se = _mean_se(done["profit_flat"])
     staked = float(done["stake"].sum())
+    status = settled["closing_status"] if "closing_status" in settled else pd.Series(dtype=object)
     return {
+        "excluded_no_later_snapshot": int((status == "fara_captura_ulterioara").sum()),
+        "excluded_unmeasured": int((status == "nemasurat").sum()),
         "bets": int(len(settled)), "settled": int(len(done)),
         "with_closing_odds": int(settled["ev_close"].notna().sum()),
         "ev_close_mean": ev_close, "ev_close_se": ev_se,

@@ -110,3 +110,33 @@ def test_bets_table_handles_rows_without_kickoff_or_league():
                              "odds": 2.2, "fair_odds": 2.0, "ev": 0.1, "stake": 20.0}])
     html = bets_table(old_row, with_date=True)
     assert "<th>Ora</th><th>Liga</th>" in html and "A &ndash; B" in html
+
+
+def test_same_snapshot_close_is_excluded_from_record(tmp_path, monkeypatch):
+    from superbet.daily import email_html
+
+    xlsx = tmp_path / "matches.xlsx"
+    _superbet(xlsx)
+    state = tmp_path / "state"
+    monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW)
+    res = run_daily("2026-09-26", xlsx, state, StakingConfig(), payload=_payload(2.0))
+    # only one snapshot so far: it is the one the bet came from, so it is not a closing line
+    assert res.summary["with_closing_odds"] == 0 and res.summary["excluded_no_later_snapshot"] == 1
+    assert "Bilanț" not in email_html(res, "2026-09-26")
+
+
+def test_value_daily_skips_cleanly_when_pinnapi_refuses(monkeypatch, capsys, tmp_path):
+    import sys
+
+    import value_daily
+    from superbet.pinnacle import PinnapiUnavailable
+
+    def refuse(*a, **k):
+        raise PinnapiUnavailable("pinnapi HTTP 403 account_suspended")
+
+    sent = []
+    monkeypatch.setattr(value_daily, "run_daily", refuse)
+    monkeypatch.setattr(value_daily, "send_email", lambda *a: sent.append(a))
+    monkeypatch.setattr(sys, "argv", ["value_daily.py", "--date", "2026-10-09", "--state-dir", str(tmp_path)])
+    value_daily.main()
+    assert not sent and "::warning::" in capsys.readouterr().out

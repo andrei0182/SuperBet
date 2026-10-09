@@ -128,3 +128,16 @@ def test_cli_value_flow(tmp_path):
                             "--out", str(tmp_path / "vb.csv")])
     assert r.exit_code == 0, r.output
     assert len(load_odds_table(data)) == 2
+
+
+def test_closing_status_requires_a_snapshot_after_the_bet():
+    from superbet.value import closing_status
+
+    df = pd.DataFrame({"logged_at": ["2026-09-26T11:00:00+00:00", "2026-09-26T11:00:00+00:00", None, None],
+                       "close_taken_at": ["2026-09-26T11:00:00+00:00", "2026-09-26T15:00:00+00:00",
+                                          "2026-09-26T15:00:00+00:00", None]})
+    status = closing_status(df, np.array([2.0, 2.0, 2.0, np.nan]))
+    assert status.tolist() == ["fara_captura_ulterioara", "ok", "nemasurat", "fara_inchidere"]
+    # historical result files have no snapshot times: their PSC* closing prices are genuine
+    assert closing_status(df.drop(columns=["close_taken_at"]), np.array([2.0, np.nan, 2.0, 2.0])).tolist() == \
+        ["ok", "fara_inchidere", "ok", "ok"]

@@ -128,9 +128,13 @@ def pinnacle_snapshot(
     days: int = typer.Option(3, help="Keep matches starting within this many days."),
 ) -> None:
     """Download Pinnacle prematch soccer odds from pinnapi.com (key in the PINNAPI_KEY environment variable)."""
-    from .pinnacle import snapshot
+    from .pinnacle import PinnapiUnavailable, snapshot
 
-    df = snapshot(out, history, days)
+    try:
+        df = snapshot(out, history, days)
+    except PinnapiUnavailable as exc:  # suspended/expired account: report it, do not fail every run
+        typer.echo(f"::warning::Captura Pinnacle sărită: {exc}")
+        return
     typer.echo(f"{len(df)} meciuri ({df['League'].nunique()} ligi) salvate în {out}"
                + (f", adăugate în {history}" if history else ""))
 

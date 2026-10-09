@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -30,12 +31,25 @@ def api_key() -> str:
     return key
 
 
+class PinnapiUnavailable(RuntimeError):
+    """pinnapi refused the key (suspended/expired account, quota): nothing to do until the account is fixed."""
+
+
 def fetch_prematch(key: str, sport_id: int = SOCCER, timeout: int = 60) -> dict:
     """One REST call: every prematch event for the sport (counts as 1 of the free tier's 100/day)."""
     req = urllib.request.Request(f"{BASE_URL}/markets?sport_id={sport_id}&event_type=prematch",
                                  headers={"x-portal-apikey": key, "User-Agent": "superbet-value/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (401, 402, 403, 429):
+            raise
+        try:
+            body = json.loads(exc.read().decode() or "{}")
+        except ValueError:
+            body = {}
+        raise PinnapiUnavailable(f"pinnapi HTTP {exc.code} {body.get('error', '')}: {body.get('message', '')}".strip()) from exc
 
 
 def _is_main_event(ev: dict) -> bool:

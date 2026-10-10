@@ -95,6 +95,16 @@ date,league,home_team,away_team,odds_over,kickoff_local,result,total_goals,check
 2026-10-06,ENGLAND: NATIONAL LEAGUE CUP,Solihull Moors,Newcastle Utd U21,1.32,21:00,over,3,2026-10-07
 2026-10-06,ENGLAND: NATIONAL LEAGUE CUP,Tamworth,Leeds U21,1.31,21:45,under,1,2026-10-07
 2026-10-08,UNITED ARAB EMIRATES: LEAGUE CUP,Al Ain,Ittihad Kalba,1.33,16:10,over,4,2026-10-09
-2026-10-09,ENGLAND: PREMIER LEAGUE CUP,Birmingham U21,Huddersfield U21,1.33,21:00,pending,,
-2026-10-09,ENGLAND: PREMIER LEAGUE CUP,Reading U21,Norwich U21,1.41,21:00,pending,,
-2026-10-09,UNITED ARAB EMIRATES: LEAGUE CUP,Ajman,Bani Yas,1.83,16:10,pending,,
+2026-10-09,ENGLAND: PREMIER LEAGUE CUP,Birmingham U21,Huddersfield U21,1.33,21:00,over,6,2026-10-10
+2026-10-09,ENGLAND: PREMIER LEAGUE CUP,Reading U21,Norwich U21,1.41,21:00,over,5,2026-10-10
+2026-10-09,UNITED ARAB EMIRATES: LEAGUE CUP,Ajman,Bani Yas,1.83,16:10,under,1,2026-10-10
+2026-10-10,ANDORRA: PRIMERA DIVISIÓ,Ordino,Inter Escaldes,1.47,21:30,pending,,
+2026-10-10,ITALY: PRIMAVERA 2,Napoli U19,Pisa U19,1.55,12:30,pending,,
+2026-10-10,ITALY: PRIMAVERA 2,Salernitana U19,Benevento U19,1.47,13:00,pending,,
+2026-10-10,ITALY: PRIMAVERA 2,Frosinone U19,Palermo U19,1.67,16:00,pending,,
+2026-10-10,MALTA: CHALLENGE LEAGUE,Zebbug,Swieqi,1.38,15:00,pending,,
+2026-10-10,MYANMAR: NATIONAL LEAGUE,Ayeyawady,Thitsar Arman,1.57,12:00,pending,,
+2026-10-10,VIETNAM: V.LEAGUE 1,Gia Lai,Da Nang,1.95,13:00,pending,,
+2026-10-10,VIETNAM: V.LEAGUE 1,Hai Phong,Thanh Hoa,1.73,14:00,pending,,
+2026-10-10,VIETNAM: V.LEAGUE 1,Nam Dinh,Phu Dong Ninh Binh,1.63,14:00,pending,,
+2026-10-10,VIETNAM: V.LEAGUE 2,Long An,Thep Can Tho,2.1,11:30,pending,,

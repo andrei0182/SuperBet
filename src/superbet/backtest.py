@@ -111,8 +111,39 @@ def _market_cols(spec: dict, prefix: str) -> list[str]:
     return [prefix + c[1:] for c in spec["prob"]]
 
 
-def walk_forward_blend(preds: pd.DataFrame, cfg: BacktestConfig) -> tuple[pd.DataFrame, dict]:
-    """Blend P_model with P_market; each block uses a blender fit on finished matches only."""
+MODEL_WEIGHT_MIN = 0.1  # below this (absolute, or as a share of both weights) the model adds ~nothing
+
+
+def model_weight_share(w_model: float, w_market: float) -> float | None:
+    """The model's share of the two blend weights, |w_model| / (|w_model| + |w_market|)."""
+    total = abs(w_model) + abs(w_market)
+    return abs(w_model) / total if total else None
+
+
+def blend_warnings(windows: dict[str, list[dict]], threshold: float = MODEL_WEIGHT_MIN) -> list[str]:
+    """Benter test: warn when the latest window gives the model (almost) no weight next to the market."""
+    out = []
+    for market, rows in windows.items():
+        fitted = [r for r in rows if r.get("w_model") is not None]
+        if not fitted:
+            continue
+        last = fitted[-1]
+        if abs(last["w_model"]) < threshold or (last["model_share"] or 0) < threshold:
+            out.append(f"ATENȚIE {market}: ponderea modelului în blend e aproape zero (w_model={last['w_model']:.3f}, "
+                       f"w_piață={last['w_market']:.3f}, fereastra {last['window_start']}) -> piața conține deja "
+                       "informația modelului; modelul nu adaugă nimic.")
+        elif last["w_model"] < 0:
+            out.append(f"ATENȚIE {market}: ponderea modelului e negativă (w_model={last['w_model']:.3f}) -> "
+                       "blendul corectează modelul în sens opus; nu-l folosi pentru pariuri.")
+    return out
+
+
+def walk_forward_blend(preds: pd.DataFrame, cfg: BacktestConfig,
+                       windows: dict[str, list[dict]] | None = None) -> tuple[pd.DataFrame, dict]:
+    """Blend P_model with P_market; each block uses a blender fit on finished matches only.
+
+    When `windows` is given, the blend weights of every walk-forward window are appended to it per market.
+    """
     preds = preds.copy()
     coefs: dict[str, dict] = {}
     for market, spec in MARKETS.items():
@@ -127,6 +158,12 @@ def walk_forward_blend(preds: pd.DataFrame, cfg: BacktestConfig) -> tuple[pd.Dat
                 continue
             past = (preds["date"] < t).to_numpy()
             blender.fit(preds.loc[past, pm_cols].to_numpy(), preds.loc[past, q_cols].to_numpy(), y_all[past])
+            if windows is not None:
+                c = blender.coefficients
+                windows.setdefault(market, []).append({
+                    "window_start": str(t.date()), "n_train": blender.n_train,
+                    "w_model": c.get("w_model"), "w_market": c.get("w_market"), "intercept": c.get("intercept"),
+                    "model_share": model_weight_share(c["w_model"], c["w_market"]) if c else None})
             preds.loc[block, f_cols] = blender.predict(preds.loc[block, pm_cols].to_numpy(),
                                                        preds.loc[block, q_cols].to_numpy())
         coefs[market] = {"n_train": blender.n_train, **blender.coefficients}
@@ -235,7 +272,8 @@ def run_backtest(data_dir: str | Path, cfg: BacktestConfig, out_dir: str | Path 
     matches = attach_btts(matches, load_btts(data_dir / BTTS_FILENAME))
     preds, xi_log = walk_forward_predictions(matches, cfg)
     preds = add_market_probabilities(preds, cfg.devig_method)
-    preds, coefs = walk_forward_blend(preds, cfg)
+    windows: dict[str, list[dict]] = {}
+    preds, coefs = walk_forward_blend(preds, cfg, windows)
 
     has_gg_odds = bool(preds.loc[preds["date"] >= cfg.start, "odds_gg"].notna().any())
     bet_markets = ["1x2", "ou25"] + (["btts"] if has_gg_odds else [])
@@ -250,6 +288,8 @@ def run_backtest(data_dir: str | Path, cfg: BacktestConfig, out_dir: str | Path 
                  "leagues": sorted(matches["league"].unique().tolist())},
         "xi_selected": xi_log,
         "blend_coefficients_last": coefs,
+        "blend_weights_by_window": windows,
+        "blend_warnings": blend_warnings(windows),
         "betting": betting_metrics(bets, cfg.staking.bankroll),
         "betting_by_market": {m: betting_metrics(bets[bets["market"] == m], cfg.staking.bankroll)
                               for m in bet_markets},

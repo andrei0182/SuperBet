@@ -36,8 +36,10 @@ def test_run_daily_logs_value_and_reports(tmp_path, monkeypatch):
     monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW + pd.Timedelta(hours=20))
     res2 = run_daily("2026-09-26", xlsx, state, StakingConfig(), payload=_payload(1.9))
     assert res2.summary["with_closing_odds"] == 1
-    assert res2.summary["clv_mean"] > 0  # 2.30 taken vs 1.90 at the close
-    assert "Bilanț" in email_html(res2, "2026-09-26")
+    assert res2.summary["ev_close_mean"] > 0  # 2.30 taken vs a no-vig ~1.95 at the close
+    html2 = email_html(res2, "2026-09-26")
+    assert "Bilanț" in html2 and "Paper trading" in html2 and "Eșantion insuficient" in html2
+    assert (state / "value_summary.json").exists()
 
 
 def test_email_without_bets():
@@ -121,7 +123,7 @@ def test_same_snapshot_close_is_excluded_from_record(tmp_path, monkeypatch):
     monkeypatch.setattr("superbet.pinnacle.pd.Timestamp.now", lambda tz=None: NOW)
     res = run_daily("2026-09-26", xlsx, state, StakingConfig(), payload=_payload(2.0))
     # only one snapshot so far: it is the one the bet came from, so it is not a closing line
-    assert res.summary["with_closing_odds"] == 0 and res.summary["excluded_no_later_snapshot"] == 1
+    assert res.summary["with_closing_odds"] == 0 and res.summary["no_close"] == 1
     assert "Bilanț" not in email_html(res, "2026-09-26")
 
 

@@ -1,4 +1,6 @@
-"""Daily recommendation email: cross-references BetExplorer's "100% Over
+"""EXPERIMENTAL (no stake: no proven edge, real flat-stake ROI is negative).
+
+Daily recommendation email: cross-references BetExplorer's "100% Over
 2.5" hit-rate data (both teams went Over 2.5 in every game of their
 season so far) against SuperBet's own daily match list (live odds,
 confirms the match is actually available to bet on) -- matched by team
@@ -189,20 +191,45 @@ def log_todays_picks(matched: pd.DataFrame, date_str: str) -> None:
         log.to_csv(path, index=False)
 
 
+EXPERIMENTAL_BANNER = (
+    "<p style='padding:8px; background:#fff3cd; border:1px solid #e0c060;'><b>EXPERIMENTAL &mdash; fara miza.</b> "
+    "Selectia \"100% Over 2.5\" nu are avantaj dovedit: ROI-ul real din jurnal (mai jos) e negativ, iar cota "
+    "medie implica deja o probabilitate apropiata de rata de reusita. Lista e trimisa doar pentru urmarire.</p>"
+)
+
+
+def log_roi(log: pd.DataFrame) -> dict:
+    """Real record of the resolved picks: hit rate on all of them, flat-stake ROI on those with a logged price."""
+    resolved = log[log["result"].isin(["over", "under"])]
+    won = resolved["result"] == "over"
+    odds = pd.to_numeric(resolved["odds_over"], errors="coerce")
+    priced = odds.notna()
+    profit = (odds[priced] - 1).where(won[priced], -1.0)
+    return {
+        "resolved": int(len(resolved)), "hits": int(won.sum()),
+        "hit_rate": float(won.mean()) if len(resolved) else None,
+        "priced": int(priced.sum()), "avg_odds": float(odds[priced].mean()) if priced.any() else None,
+        "roi": float(profit.mean()) if priced.any() else None,
+        "roi_se": float(profit.std(ddof=1) / len(profit) ** 0.5) if priced.sum() > 1 else None,
+        "implied_p": float((1 / odds[priced]).mean()) if priced.any() else None,
+    }
+
+
 def accuracy_summary_html() -> str:
     path = Path(LOG_PATH)
     if not path.exists():
         return ""
-    log = pd.read_csv(path, dtype=str)
-    resolved = log[log["result"].isin(["over", "under"])]
-    if resolved.empty:
+    r = log_roi(pd.read_csv(path, dtype=str))
+    if not r["resolved"]:
         return ""
-    hit_rate = (resolved["result"] == "over").mean()
-    return (
-        f"<p style='margin-top:20px; padding-top:10px; border-top:1px solid #ddd; color:#555;'>"
-        f"<b>Statistica reala pana acum:</b> din {len(resolved)} recomandari confirmate, "
-        f"{(resolved['result'] == 'over').sum()} au fost Peste 2.5 ({hit_rate:.0%}).</p>"
-    )
+    text = (f"<b>Statistica reala pana acum:</b> din {r['resolved']} recomandari confirmate, "
+            f"{r['hits']} au fost Peste 2.5 ({r['hit_rate']:.1%}).")
+    if r["roi"] is not None:
+        se = f" &plusmn; {r['roi_se']:.1%}" if r["roi_se"] else ""
+        text += (f" <b>ROI real la miza fixa: {r['roi']:+.1%}</b>{se} pe {r['priced']} recomandari cu cota Superbet "
+                 f"(cota medie {r['avg_odds']:.2f}, probabilitate implicita medie {r['implied_p']:.1%}). "
+                 "Fara avantaj dovedit.")
+    return f"<p style='margin-top:20px; padding-top:10px; border-top:1px solid #ddd; color:#555;'>{text}</p>"
 
 
 def closing_line_html(history_path: str | None) -> str:
@@ -223,7 +250,8 @@ def closing_line_html(history_path: str | None) -> str:
 def build_email_body(matched: pd.DataFrame, unmatched_count: int, date_str: str,
                      closing_history: str | None = None) -> str:
     lines = []
-    lines.append(f"<h2>Recomandari zilnice -- {date_str}</h2>")
+    lines.append(f"<h2>Recomandari zilnice (EXPERIMENTAL) -- {date_str}</h2>")
+    lines.append(EXPERIMENTAL_BANNER)
     lines.append(
         "<p>Meciuri unde <b>ambele echipe</b> au avut Peste 2.5 goluri (3+ goluri) "
         "in <b>fiecare</b> meci din sezonul curent (conform BetExplorer), "
@@ -307,7 +335,7 @@ def main() -> None:
             print(f"  - {name}")
 
     body = build_email_body(matched, unmatched_count, args.date, args.closing_history)
-    subject = f"Recomandari zilnice ({len(matched)} meciuri) -- {args.date}"
+    subject = f"[EXPERIMENTAL, fara miza] Recomandari zilnice ({len(matched)} meciuri) -- {args.date}"
 
     if args.dry_run:
         print(subject)

@@ -126,13 +126,21 @@ def pinnacle_snapshot(
     history: Path | None = typer.Option(Path("outputs/pinnacle_snapshots.csv"),
                                         help="Every snapshot is appended here; the last one before kick-off is the closing line."),
     days: int = typer.Option(3, help="Keep matches starting within this many days."),
+    only_if_kickoff_within: int = typer.Option(
+        0, help="Minutes; skip the request unless the history knows a match starting that soon (0 = always fetch)."),
+    requests_log: Path | None = typer.Option(None, help="Records every pinnapi request; enforces --max-per-day."),
+    max_per_day: int = typer.Option(90, help="Our cap on pinnapi requests per UTC day (free tier: 100)."),
 ) -> None:
     """Download Pinnacle prematch soccer odds from pinnapi.com (key in the PINNAPI_KEY environment variable)."""
-    from .pinnacle import PinnapiUnavailable, snapshot
+    from .pinnacle import PinnapiUnavailable, kickoff_within, snapshot
 
+    now = pd.Timestamp.now(tz="UTC")
+    if only_if_kickoff_within and history is not None and not kickoff_within(history, now, only_if_kickoff_within):
+        typer.echo(f"Niciun meci în următoarele {only_if_kickoff_within} minute: captură sărită (nicio cerere).")
+        return
     try:
-        df = snapshot(out, history, days)
-    except PinnapiUnavailable as exc:  # suspended/expired account: report it, do not fail every run
+        df = snapshot(out, history, days, now=now, requests_log=requests_log, max_per_day=max_per_day)
+    except PinnapiUnavailable as exc:  # suspended/expired account or our daily cap: report it, do not fail every run
         typer.echo(f"::warning::Captura Pinnacle sărită: {exc}")
         return
     typer.echo(f"{len(df)} meciuri ({df['League'].nunique()} ligi) salvate în {out}"
@@ -144,21 +152,41 @@ def value_settle(
     log: Path = typer.Option(Path("outputs/value_log.csv")),
     results: Path | None = typer.Option(None, help="Results with FTHG,FTAG (+ closing PSCH.. if no --closing-history)."),
     closing_history: Path | None = typer.Option(None, help="pinnacle-snapshot history: closing = last snapshot before kick-off."),
+    bet_repo: Path | None = typer.Option(None, help="Checkout of andrei0182/bet: scrape missing scores from BetExplorer."),
+    results_cache: Path | None = typer.Option(None, help="Scores cache (default: value_results.csv next to --log)."),
     out: Path = typer.Option(Path("outputs/value_settled.csv")),
+    summary_out: Path | None = typer.Option(None, help="Paper-trading report as JSON."),
+    bankroll: float = typer.Option(1000.0), stake_share: float = typer.Option(0.01, help="Flat paper stake."),
+    league: list[str] = typer.Option([], help="Only leagues containing this text (repeatable)."),
+    tier: str | None = typer.Option(None, help="Only one level: 'ligi mari', 'ligi inferioare/amatori', 'tineret/rezerve'."),
 ) -> None:
-    """Settle logged bets and measure them against the Pinnacle closing line."""
+    """Settle logged bets (scores, profit) and measure them against a distinct Pinnacle closing line."""
+    from .paper import TIERS, format_paper_report, paper_report
     from .pinnacle import attach_closing, closing_lines
-    from .value import load_odds_table, read_log, settle, summarize
+    from .results import attach_scores, update_results
+    from .value import load_odds_table, read_log, settle
 
     if results is None and closing_history is None:
         raise typer.BadParameter("give --results and/or --closing-history")
+    if tier is not None and tier not in TIERS:
+        raise typer.BadParameter(f"--tier must be one of {', '.join(TIERS)}")
     res = load_odds_table(results) if results is not None else None
     if closing_history is not None:
         res = attach_closing(res, closing_lines(closing_history))
-    settled = settle(read_log(log), res)
+    bets = read_log(log)
+    cache_path = results_cache or log.parent / "value_results.csv"
+    if bet_repo is not None or cache_path.exists():
+        bets = attach_scores(bets, update_results(bets, cache_path, bet_repo))
+    settled = settle(bets, res)
     out.parent.mkdir(parents=True, exist_ok=True)
     settled.to_csv(out, index=False)
-    typer.echo(format_value_summary(summarize(settled)))
+    report = paper_report(settled, bankroll, stake_share, leagues=league or None, tier=tier)
+    if summary_out is not None:
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    typer.echo(format_paper_report(report))
+    typer.echo("\nEV la închidere = cota luată x probabilitatea Pinnacle de închidere fără marjă (power) - 1. "
+               "Coloana clv_raw (cote brute, cu marjă) e doar informativă.")
 
 
 @app.command("value-backtest")
@@ -188,7 +216,8 @@ def format_value_summary(s: dict) -> str:
     lines = [
         f"Pariuri: {s['bets']} (decontate {s['settled']}, cu cote de închidere {s['with_closing_odds']})",
         f"EV la închidere (Pinnacle, de-vig): {_fmt(s['ev_close_mean'], True)} {se(s['ev_close_se'])}  <- estimarea avantajului",
-        f"CLV mediu: {_fmt(s['clv_mean'], True)}, pariuri cu CLV pozitiv: {_fmt(s['clv_positive_share'], True)}",
+        f"Pariuri cu EV la închidere pozitiv: {_fmt(s['ev_close_positive_share'], True)} | excluse no_close: "
+        f"{s['no_close']} | fără închidere: {s['missing_close']}",
         f"Hit rate: {_fmt(s['hit_rate'], True)} | yield mize egale: {_fmt(s['yield_flat'], True)} {se(s['yield_flat_se'])}"
         f" | yield Kelly: {_fmt(s['yield_kelly'], True)} | profit: {s['profit']:.2f}",
     ]
@@ -230,6 +259,14 @@ def format_summary(summary: dict) -> str:
                      f"{_fmt(q['model']['brier'])} | piață {_fmt(q['market']['log_loss'])} / "
                      f"{_fmt(q['market']['brier'])} | blend {_fmt(q['blend']['log_loss'])} / {_fmt(q['blend']['brier'])}")
         lines.append(f"    {q['verdict']}")
+    lines.append("\nTest Benter (blend logistic model + piață, ultima fereastră):")
+    for market, rows in summary.get("blend_weights_by_window", {}).items():
+        fitted = [r for r in rows if r.get("w_model") is not None]
+        if fitted:
+            r = fitted[-1]
+            lines.append(f"  {market}: w_model {r['w_model']:.3f}, w_piață {r['w_market']:.3f}, "
+                         f"pondere model {_fmt(r['model_share'], True)} ({len(fitted)} ferestre)")
+    lines += [f"  {w}" for w in summary.get("blend_warnings", [])]
     if not summary["btts_backtested"]:
         lines.append("\nGG: fără data/raw/btts_odds.csv -> evaluat doar ca acuratețe, fără ROI.")
     return "\n".join(lines)

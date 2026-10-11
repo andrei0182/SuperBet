@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import html
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
+from .paper import paper_report, paper_report_html
 from .pinnacle import attach_closing, closing_lines, snapshot
+from .results import attach_scores, update_results
 from .staking import StakingConfig
 from .value import append_log, find_value, join_sources, load_odds_table, load_superbet_excel, read_log, settle, \
     summarize
+
+REQUESTS_LOG = "pinnapi_requests.csv"
+RESULTS_CACHE = "value_results.csv"
 
 
 @dataclass
@@ -22,31 +29,35 @@ class DailyResult:
     compared: int
     unmatched: pd.DataFrame
     summary: dict
+    paper: dict | None = None
 
 
 def run_daily(date: str, superbet_xlsx: str | Path, state_dir: str | Path, staking: StakingConfig,
               ev_min: float = 0.02, max_odds: float = 8.0, team_map: dict[str, str] | None = None,
-              payload: dict | None = None) -> DailyResult:
+              payload: dict | None = None, bet_repo: str | Path | None = None) -> DailyResult:
     """Snapshot Pinnacle, compare with Superbet for `date`, log new value bets, settle the log on closing lines."""
-    return run_range([date], {date: superbet_xlsx}, state_dir, staking, ev_min, max_odds, team_map, payload)[date]
+    return run_range([date], {date: superbet_xlsx}, state_dir, staking, ev_min, max_odds, team_map, payload,
+                     bet_repo)[date]
 
 
 def run_range(dates: list[str], superbet_xlsx: dict[str, str | Path], state_dir: str | Path, staking: StakingConfig,
               ev_min: float = 0.02, max_odds: float = 8.0, team_map: dict[str, str] | None = None,
-              payload: dict | None = None) -> dict[str, DailyResult]:
+              payload: dict | None = None, bet_repo: str | Path | None = None) -> dict[str, DailyResult]:
     """One Pinnacle snapshot covering every date, then the daily comparison for each date (one Superbet file each)."""
     state = Path(state_dir)
     sharp_path = state / "sharp.csv"
     now = pd.Timestamp.now(tz="UTC")
     days = max(3, (pd.Timestamp(max(dates)) - now.tz_localize(None).normalize()).days + 2)
-    snapshot(sharp_path, state / "pinnacle_snapshots.csv", days=days, now=now, payload=payload)
+    snapshot(sharp_path, state / "pinnacle_snapshots.csv", days=days, now=now, payload=payload,
+             requests_log=state / REQUESTS_LOG)
     sharp = load_odds_table(sharp_path)
     out = {d: _compare_day(d, sharp, superbet_xlsx[d], state, staking, ev_min, max_odds, team_map, now)
            for d in dates}
-    settled = settle_log(state)
+    settled = settle_log(state, bet_repo, bankroll=staking.bankroll)
     summary = summarize(settled) if settled is not None else {}
+    paper = paper_report(settled, staking.bankroll) if settled is not None and len(settled) else None
     for res in out.values():
-        res.summary = summary
+        res.summary, res.paper = summary, paper
     return out
 
 
@@ -74,16 +85,24 @@ def record_day(state: Path, date: str, compared: int, unmatched: int, bets: int)
     row.sort_values("date").to_csv(path, index=False)
 
 
-def settle_log(state: Path) -> pd.DataFrame | None:
-    """Settle every logged bet on the closing lines from the snapshot history; None when nothing is logged."""
-    log_path, history = state / "value_log.csv", state / "pinnacle_snapshots.csv"
-    if not log_path.exists():
+def settle_log(state: Path, bet_repo: str | Path | None = None, bankroll: float = 1000.0) -> pd.DataFrame | None:
+    """Settle every logged bet: scores (BetExplorer, cached) and closing lines from the snapshot history.
+
+    Writes value_settled.csv and value_summary.json (paper-trading report); None when nothing is logged.
+    """
+    log_path, history = Path(state) / "value_log.csv", Path(state) / "pinnacle_snapshots.csv"
+    if not log_path.exists() or not history.exists():
         return None
-    closing = attach_closing(None, closing_lines(history)) if history.exists() else None
-    if closing is None:
-        return None
-    settled = settle(read_log(log_path), closing)
-    settled.to_csv(state / "value_settled.csv", index=False)
+    log = read_log(log_path)
+    try:
+        cache = update_results(log, Path(state) / RESULTS_CACHE, bet_repo)
+    except Exception as exc:  # scores are a bonus: the closing-line record must not fail because of them
+        print(f"::warning::Rezultatele nu au putut fi actualizate: {exc}")
+        cache = pd.DataFrame(columns=["date", "home", "away", "FTHG", "FTAG", "status"])
+    settled = settle(attach_scores(log, cache), attach_closing(None, closing_lines(history)))
+    settled.to_csv(Path(state) / "value_settled.csv", index=False)
+    (Path(state) / "value_summary.json").write_text(
+        json.dumps(paper_report(settled, bankroll), indent=2, ensure_ascii=False, default=str))
     return settled
 
 
@@ -111,22 +130,22 @@ def weekly_html(state_dir: str | Path, end: str) -> tuple[str, str]:
             f"<tr><td>{r.date:%d.%m}</td><td>{e(r.home)} &ndash; {e(r.away)}</td><td>{e(str(r.selection))}</td>"
             f"<td>{r.odds:.2f}</td><td>{r.ev * 100:+.1f}%</td>"
             f"<td>{'-' if pd.isna(r.close_odds) else f'{r.close_odds:.2f}'}</td>"
-            f"<td>{'-' if pd.isna(r.ev_close) else f'{r.ev_close * 100:+.1f}%'}</td></tr>"
+            f"<td>{'-' if pd.isna(r.ev_close) else f'{r.ev_close * 100:+.1f}%'}</td>"
+            f"<td>{_result_cell(r)}</td></tr>"
             for r in week.itertuples())
         parts.append("<table border='1' cellpadding='4' cellspacing='0'><tr><th>Data</th><th>Meci</th><th>Pariu</th>"
                      "<th>Cota luată</th><th>EV la pariere</th><th>Cota Pinnacle la închidere</th>"
-                     f"<th>EV la închidere</th></tr>{rows}</table>")
+                     f"<th>EV la închidere</th><th>Rezultat</th></tr>{rows}</table>")
         ws = summarize(week)
-        parts.append(f"<p>Săptămâna: EV la închidere {_pct(ws['ev_close_mean'])} &plusmn; {_pct(ws['ev_close_se'])}, "
-                     f"pariuri cu CLV pozitiv {_pct(ws['clv_positive_share'])}.</p>")
+        parts.append(f"<p>Săptămâna: EV la închidere {_pct(ws['ev_close_mean'])} &plusmn; {_pct(ws['ev_close_se'])} "
+                     f"pe {ws['with_closing_odds']} pariuri cu închidere distinctă, pozitive "
+                     f"{_pct(ws['ev_close_positive_share'])}.</p>" + excluded_note(ws))
     if settled is not None and len(settled):
         s = summarize(settled)
-        verdict = ("clar pozitiv" if s["ev_close_se"] and s["ev_close_mean"] / s["ev_close_se"] > 2
-                   else "încă neconcludent (prea puține pariuri sau fără avantaj)")
         parts.append(f"<h3>De la început: {s['bets']} pariuri ({s['with_closing_odds']} cu linie de închidere)</h3>"
                      f"<p>EV la închidere: <b>{_pct(s['ev_close_mean'])}</b> &plusmn; {_pct(s['ev_close_se'])} "
-                     f"&mdash; {verdict}. Pariuri cu CLV pozitiv: {_pct(s['clv_positive_share'])}.</p>"
-                     + excluded_note(s))
+                     f"&mdash; {verdict_text(s)}.</p>" + excluded_note(s))
+        parts.append(paper_report_html(paper_report(settled)))
     else:
         parts.append("<p>Încă niciun pariu în jurnal.</p>")
     parts.append("<p style='color:#666'>Profitul pe o săptămână e aproape numai zgomot; contează EV-ul la închidere "
@@ -173,17 +192,29 @@ def range_email_html(results: dict[str, DailyResult]) -> tuple[str, str]:
     return subject, "\n".join(parts)
 
 
+def _result_cell(r) -> str:
+    if pd.isna(getattr(r, "FTHG", np.nan)) or pd.isna(getattr(r, "won", np.nan)):
+        return "în așteptare"
+    return f"{int(r.FTHG)}-{int(r.FTAG)} {'câștigat' if r.won == 1 else 'pierdut'}"
+
+
+def verdict_text(s: dict) -> str:
+    if s.get("ev_close_se") and s["ev_close_mean"] / s["ev_close_se"] > 2:
+        return "pozitiv: prețurile luate bat linia de închidere"
+    return "încă neconcludent"
+
+
 def excluded_note(s: dict) -> str:
     """Bets left out of the closing-line record because their close could not be measured honestly."""
-    late, old = s.get("excluded_no_later_snapshot", 0), s.get("excluded_unmeasured", 0)
-    if not late and not old:
+    same, missing = s.get("no_close", 0), s.get("missing_close", 0)
+    if not same and not missing:
         return ""
     bits = []
-    if late:
-        bits.append(f"{late} fără nicio captură Pinnacle după pariu")
-    if old:
-        bits.append(f"{old} vechi, dinainte de înregistrarea orei pariului")
-    return (f"<p style='color:#888; font-size:0.9em;'>Excluse din bilanț ({', '.join(bits)}): pentru ele "
+    if same:
+        bits.append(f"{same} no_close: ultima captură Pinnacle dinainte de start e chiar cea în care s-a găsit pariul")
+    if missing:
+        bits.append(f"{missing} fără cotă Pinnacle de închidere")
+    return (f"<p style='color:#888; font-size:0.9em;'>Excluse din bilanț ({'; '.join(bits)}): pentru ele "
             "linia de închidere nu se poate măsura corect.</p>")
 
 
@@ -202,12 +233,11 @@ def email_html(result: DailyResult, date: str) -> str:
         parts.append(bets_table(result.bets, with_date=False))
     s = result.summary
     if s and s.get("with_closing_odds"):
-        verdict = ("pozitiv: prețurile luate bat linia de închidere" if s["ev_close_se"] and
-                   s["ev_close_mean"] / s["ev_close_se"] > 2 else "încă neconcludent")
         parts.append(f"<h3>Bilanț (toate pariurile cu linie de închidere: {s['with_closing_odds']})</h3>"
                      f"<p>EV la închidere: <b>{_pct(s['ev_close_mean'])}</b> &plusmn; {_pct(s['ev_close_se'])} "
-                     f"({verdict}). Pariuri cu CLV pozitiv: {_pct(s['clv_positive_share'])}.</p>"
-                     + excluded_note(s))
+                     f"({verdict_text(s)}).</p>" + excluded_note(s))
+    if result.paper:
+        parts.append(paper_report_html(result.paper))
     parts.append("<p style='color:#666'>Estimare, nu garanție. EV la închidere pozitiv, constant, pe sute de pariuri "
                  "e singurul semn credibil de avantaj. Pariază doar sume pe care îți permiți să le pierzi.</p>")
     return "\n".join(parts)

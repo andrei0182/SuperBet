@@ -82,6 +82,12 @@ model / piață (cote la momentul pariului, de-vig) / blend pe **aceleași** mec
 baseline-ul Pinnacle closing. Dacă modelul nu bate piața la log loss, raportul spune explicit:
 `ATENȚIE: modelul NU bate piața la log loss walk-forward -> nu are edge demonstrat`.
 
+**Test Benter.** `summary.json` conține și `blend_weights_by_window`: pentru fiecare piață și fiecare fereastră
+walk-forward, ponderile regresiei logistice pe `[logit(P_model), logit(P_piață)]` (`w_model`, `w_market`,
+`intercept`, `n_train`) și `model_share = |w_model| / (|w_model| + |w_market|)`. Dacă în ultima fereastră
+`|w_model| < 0.1` sau `model_share < 0.1`, `blend_warnings` (și consola) spune că modelul nu adaugă informație
+peste piață; o pondere negativă e semnalată separat.
+
 ### Comenzi CLI
 
 ```bash
@@ -135,9 +141,33 @@ superbet value --odds outputs/sharp.csv --superbet-xlsx output/matches.xlsx --da
 # de mai multe ori pe zi (ultima captură înainte de start = linia de închidere)
 superbet pinnacle-snapshot
 
-# după meciuri: CLV și EV la închidere din capturi (+ scoruri, dacă ai un fișier de rezultate)
-superbet value-settle --log outputs/value_log.csv --closing-history outputs/pinnacle_snapshots.csv
+# după meciuri: EV la închidere din capturi + scorurile de pe BetExplorer (checkout andrei0182/bet în ../bet)
+superbet value-settle --log outputs/value_log.csv --closing-history outputs/pinnacle_snapshots.csv \
+    --bet-repo ../bet --summary-out outputs/value_summary.json
+# filtre: --league "poland" (repetabil, potrivire parțială), --tier "ligi mari" | "ligi inferioare/amatori" | "tineret/rezerve"
 ```
+
+**Linia de închidere.** Închiderea unui pariu = ultima captură Pinnacle strict înainte de start, cu condiția să fie
+*alta* decât captura în care s-a găsit pariul (cel puțin 30 de minute după `logged_at`). Altfel pariul primește
+`closing_status = no_close` și e exclus din toate statisticile (numărat separat); `missing_close` = nicio cotă de
+închidere. Pariurile vechi, fără `logged_at`, sunt `no_close` când captura de închidere dă exact EV-ul de la
+pariere (adică e aceeași captură). Singurul indicator raportat e **EV la închidere** = cota luată × probabilitatea
+Pinnacle de închidere fără marjă (de-vig power) − 1. Coloana `clv_raw` (cotă luată / cotă Pinnacle brută − 1) include
+marja Pinnacle (~11% pe 1X2 în ligile mici), deci e umflată și rămâne doar informativă. `close_minutes_before` arată
+cât de departe de start a fost luată închiderea.
+
+**Rezultate.** `value-settle --bet-repo` (și rularea zilnică) rulează scraperul BetExplorer din `andrei0182/bet`
+(aceeași abordare ca `check_results.py`) pentru zilele cu pariuri fără scor, potrivește meciurile după nume și
+scrie `FTHG`, `FTAG`, `won`, `profit` (miza din jurnal), `profit_flat` (la 1 unitate) și `result_status`.
+Scorurile se păstrează în `value_results.csv` (fiecare meci terminat se caută o singură dată). Meciurile amânate
+sau negăsite rămân `pending` și se reîncearcă 14 zile; pariurile niciodată verificate se completează până la 60 de zile în urmă.
+
+**Raport paper trading** (`value_summary.json`, consola `value-settle`, emailurile zilnic și săptămânal): miză fixă
+1% din bankroll pe pariu; număr pariuri, câte au închidere distinctă / `no_close` / fără închidere, EV la închidere
+mediu ± eroare standard, % pozitive, hit rate, ROI, profit, drawdown maxim, plus aceleași cifre pe nivel
+(ligi mari / ligi inferioare și amatori / tineret și rezerve, după numele ligii și al echipelor) și pe ligă.
+Sub 300 de pariuri cu închidere distinctă raportul spune explicit **„eșantion insuficient (<300)”**: nicio
+concluzie, fără miză reală. Hit rate-ul și ROI-ul pe câteva sute de pariuri sunt în mare parte zgomot.
 
 `pinnacle-snapshot` face o singură cerere REST pentru toate meciurile de fotbal (planul gratuit pinnapi are
 100/zi) și păstrează meciurile din următoarele `--days` zile (implicit 3), fără pseudo-meciurile de cornere.
@@ -156,10 +186,13 @@ care diferă între surse se potrivesc prin `team_map.csv` (`superbet_name,name`
 
 | Workflow | Când | Ce face |
 |---|---|---|
-| `pinnacle-snapshots.yml` | la fiecare 2 ore | o captură Pinnacle; ultima dinainte de start = linia de închidere |
+| `pinnacle-snapshots.yml` | la 2 ore + la 15 min între 09–22 UTC dacă un meci începe în ≤ 3 ore | o captură Pinnacle; ultima dinainte de start = linia de închidere |
 | `value-bets.yml` | zilnic ~09–10 (ora României) | scraper Superbet pentru azi → pariuri cu EV ≥ 2% → email cu pariurile și bilanțul EV la închidere; **lunea** și un rezumat săptămânal (zile rulate, meciuri comparate, pariurile săptămânii cu cota de închidere, EV la închidere pe săptămână și de la început) |
 
-Consum pinnapi: ~13 cereri/zi din cele 100 gratuite. Starea (capturile compactate, jurnalul pariurilor,
+Buget pinnapi (100 cereri/zi UTC gratuit; plafonul nostru 90, impus în cod din `pinnapi_requests.csv`):
+12 cereri/zi pentru capturile la 2 ore, cel mult 52 pentru capturile dese (la 15 minute între 09:00 și 21:59 UTC,
+doar când un meci cunoscut începe în următoarele 3 ore; altfel rularea iese fără cerere), 1–2 pentru raportul
+zilnic. Cel mai rău caz ~66/zi, de obicei 40–55. Starea (capturile compactate, jurnalul pariurilor,
 `value_settled.csv`) se păstrează pe branch-ul `value-data`, creat automat la prima rulare, ca să nu umple
 `main` cu commit-uri. Opțional, `team_map.csv` în rădăcina repo-ului (`superbet_name,name`) pentru echipele
 care nu se potrivesc automat. Rulare manuală: tab-ul Actions → workflow → **Run workflow**; local:
@@ -177,6 +210,14 @@ mesaj, fără eroare.
 
 Limitări specifice: ai nevoie de cotele Pinnacle în timp real (în România, de regulă, printr-un API de cote plătit);
 casele limitează rapid conturile care bat linia de închidere; rezultatul istoric e pe case britanice, nu pe Superbet.
+
+### „100% Over 2.5” (`daily_recommendations.py`): EXPERIMENTAL, fără miză
+
+Emailul zilnic cu meciurile în care ambele echipe au avut Peste 2.5 în fiecare meci al sezonului (BetExplorer)
+e marcat explicit experimental, fără miză: nu are avantaj dovedit. Emailul arată rezultatul real din
+`recommendations_log.csv`: rata de reușită pe toate recomandările rezolvate și ROI-ul la miză fixă (± eroare
+standard) pe cele cu cotă Superbet înregistrată. La 11.10.2026: 105 rezolvate, 64,8% Peste 2.5; ROI −0,8% ± 8,1%
+pe cele 94 cu cotă (cotă medie 1,64, probabilitate implicită medie 63,5%).
 
 ### Limitări
 

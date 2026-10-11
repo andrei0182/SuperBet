@@ -49,3 +49,19 @@ def test_daily_recommendations_section_is_optional(tmp_path, monkeypatch):
     monkeypatch.setattr(dr, "LOG_PATH", str(tmp_path / "missing.csv"))
     assert dr.closing_line_html(None) == ""
     assert dr.closing_line_html(str(tmp_path / "nope.csv")) == ""
+
+
+def test_over25_email_is_experimental_and_shows_real_roi(tmp_path, monkeypatch):
+    import daily_recommendations as dr
+
+    log = tmp_path / "log.csv"
+    pd.DataFrame({"date": ["2026-09-20"] * 4, "league": ["x"] * 4, "home_team": list("abcd"), "away_team": list("efgh"),
+                  "odds_over": ["1.60", "1.60", "1.60", ""], "kickoff_local": [""] * 4,
+                  "result": ["over", "under", "over", "over"], "total_goals": ["3", "1", "4", "5"],
+                  "checked_at": [""] * 4}).to_csv(log, index=False)
+    monkeypatch.setattr(dr, "LOG_PATH", str(log))
+    r = dr.log_roi(pd.read_csv(log, dtype=str))
+    assert r["resolved"] == 4 and r["hits"] == 3 and r["priced"] == 3
+    assert r["roi"] == pytest.approx((0.6 - 1 + 0.6) / 3)  # the pick without a price only counts in the hit rate
+    html = dr.build_email_body(pd.DataFrame(), 0, "2026-09-21")
+    assert "EXPERIMENTAL" in html and "fara miza" in html and "ROI real la miza fixa: +6.7%" in html

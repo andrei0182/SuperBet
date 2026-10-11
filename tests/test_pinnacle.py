@@ -110,3 +110,50 @@ def test_cli_snapshot_does_not_fail_when_pinnapi_refuses(tmp_path, monkeypatch):
     monkeypatch.setattr("superbet.pinnacle.snapshot", refuse)
     r = CliRunner().invoke(app, ["pinnacle-snapshot", "--out", str(tmp_path / "s.csv"), "--history", str(tmp_path / "h.csv")])
     assert r.exit_code == 0 and "::warning::" in r.output
+
+
+def test_request_budget_is_recorded_and_enforced(tmp_path, monkeypatch):
+    from superbet.pinnacle import RequestBudgetExhausted, requests_today
+
+    calls = []
+    monkeypatch.setattr("superbet.pinnacle.fetch_prematch", lambda key: calls.append(key) or _payload())
+    log = tmp_path / "requests.csv"
+    for minutes in (0, 15):
+        snapshot(tmp_path / "a.csv", tmp_path / "h.csv", now=NOW + pd.Timedelta(minutes=minutes), key="k",
+                 requests_log=log, max_per_day=2)
+    assert requests_today(log, NOW) == 2 and len(calls) == 2
+    with pytest.raises(RequestBudgetExhausted, match="2/2"):
+        snapshot(tmp_path / "a.csv", tmp_path / "h.csv", now=NOW + pd.Timedelta(hours=1), key="k",
+                 requests_log=log, max_per_day=2)
+    assert len(calls) == 2  # refused before any request
+    # the budget is per UTC day; a payload given directly (tests, replays) is not a request
+    assert requests_today(log, NOW + pd.Timedelta(days=1)) == 0
+    snapshot(tmp_path / "a.csv", tmp_path / "h.csv", now=NOW + pd.Timedelta(hours=2), payload=_payload(),
+             requests_log=log, max_per_day=2)
+    assert requests_today(log, NOW) == 2
+
+
+def test_kickoff_within_reads_the_history(tmp_path):
+    from superbet.pinnacle import kickoff_within
+
+    hist = tmp_path / "h.csv"
+    assert kickoff_within(hist, NOW, 180)  # no history yet: fetch
+    snapshot(tmp_path / "a.csv", hist, now=NOW, payload=_payload())  # Arsenal 14:00Z, Leeds 22:30Z on 26.09
+    assert not kickoff_within(hist, pd.Timestamp("2026-09-26T08:00:00Z"), 180)
+    assert kickoff_within(hist, pd.Timestamp("2026-09-26T11:30:00Z"), 180)
+    assert not kickoff_within(hist, pd.Timestamp("2026-09-26T14:30:00Z"), 180)  # Arsenal started, Leeds is 8h away
+
+
+def test_cli_snapshot_gate_skips_without_a_request(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from superbet.cli import app
+
+    hist = tmp_path / "h.csv"
+    snapshot(tmp_path / "a.csv", hist, now=NOW, payload=_payload())
+    monkeypatch.setattr("superbet.pinnacle.fetch_prematch", lambda key: pytest.fail("no request expected"))
+    monkeypatch.setattr("superbet.cli.pd.Timestamp.now", lambda tz=None: pd.Timestamp("2026-09-26T08:00:00Z"))
+    r = CliRunner().invoke(app, ["pinnacle-snapshot", "--out", str(tmp_path / "s.csv"), "--history", str(hist),
+                                 "--only-if-kickoff-within", "180"])
+    assert r.exit_code == 0, r.output
+    assert "captură sărită" in r.output

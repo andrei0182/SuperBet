@@ -35,6 +35,42 @@ class PinnapiUnavailable(RuntimeError):
     """pinnapi refused the key (suspended/expired account, quota): nothing to do until the account is fixed."""
 
 
+class RequestBudgetExhausted(PinnapiUnavailable):
+    """Our own daily cap on pinnapi requests is reached (kept below the free tier's 100/day)."""
+
+
+DAILY_LIMIT = 100        # pinnapi free tier, requests per UTC day
+DEFAULT_MAX_PER_DAY = 90  # our cap: leaves room for manual runs and retries
+
+
+def requests_today(log: str | Path, now: pd.Timestamp) -> int:
+    """pinnapi requests recorded in `log` on the current UTC day."""
+    log = Path(log)
+    if not log.exists():
+        return 0
+    at = pd.to_datetime(pd.read_csv(log)["requested_at"], utc=True, format="mixed")
+    return int((at.dt.normalize() == now.normalize()).sum())
+
+
+def record_request(log: str | Path, now: pd.Timestamp, keep_days: int = 7) -> None:
+    """Append one request to the budget log, dropping entries older than `keep_days`."""
+    log = Path(log)
+    old = pd.read_csv(log) if log.exists() else pd.DataFrame(columns=["requested_at"])
+    rows = pd.concat([old, pd.DataFrame({"requested_at": [now.isoformat()]})], ignore_index=True)
+    at = pd.to_datetime(rows["requested_at"], utc=True, format="mixed")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    rows[at >= now - pd.Timedelta(days=keep_days)].to_csv(log, index=False)
+
+
+def kickoff_within(history: str | Path, now: pd.Timestamp, minutes: int) -> bool:
+    """True when the snapshot history knows a match starting in the next `minutes` (no history: True)."""
+    history = Path(history)
+    if not history.exists():
+        return True
+    starts = pd.to_datetime(pd.read_csv(history, usecols=["starts"])["starts"], utc=True, format="mixed")
+    return bool(((starts > now) & (starts <= now + pd.Timedelta(minutes=minutes))).any())
+
+
 def fetch_prematch(key: str, sport_id: int = SOCCER, timeout: int = 60) -> dict:
     """One REST call: every prematch event for the sport (counts as 1 of the free tier's 100/day)."""
     req = urllib.request.Request(f"{BASE_URL}/markets?sport_id={sport_id}&event_type=prematch",
@@ -98,10 +134,20 @@ def compact_history(history: str | Path, keep_days: int = 45) -> pd.DataFrame:
 
 def snapshot(out: str | Path, history: str | Path | None = None, days: int = 3,
              key: str | None = None, now: pd.Timestamp | None = None, payload: dict | None = None,
-             compact: bool = True) -> pd.DataFrame:
-    """Write the current sharp table (matches in the next `days`) and add it to `history` (compacted by default)."""
+             compact: bool = True, requests_log: str | Path | None = None,
+             max_per_day: int = DEFAULT_MAX_PER_DAY) -> pd.DataFrame:
+    """Write the current sharp table (matches in the next `days`) and add it to `history` (compacted by default).
+
+    With `requests_log`, every API request is recorded there and refused once `max_per_day` is reached.
+    """
     now = now or pd.Timestamp.now(tz="UTC")
-    payload = payload if payload is not None else fetch_prematch(key or api_key())
+    if payload is None:
+        if requests_log is not None:
+            used = requests_today(requests_log, now)
+            if used >= max_per_day:
+                raise RequestBudgetExhausted(f"bugetul zilnic pinnapi atins: {used}/{max_per_day} cereri azi (UTC)")
+            record_request(requests_log, now)  # a refused request still counts against the quota
+        payload = fetch_prematch(key or api_key())
     df = events_to_frame(payload, now)
     df = df[df["starts"] <= now + pd.Timedelta(days=days)]
     out = Path(out)

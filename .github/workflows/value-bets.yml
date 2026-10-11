@@ -1,7 +1,8 @@
 name: Daily value bets (Superbet vs Pinnacle)
 
 # Once a day: scrape Superbet for today, compare with Pinnacle's no-vig price, log bets with
-# EV >= 2%, settle past bets against their closing lines and email the report.
+# EV >= 2%, fill in final scores of past bets (BetExplorer), settle them against their closing
+# lines and email the report (paper trading, 1% flat stake). 1 pinnapi request per run.
 # On Mondays it also emails a weekly summary of the previous 7 days.
 # Needs secrets PINNAPI_KEY, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, EMAIL_TO.
 
@@ -46,6 +47,15 @@ jobs:
       - uses: actions/checkout@v4
         if: env.PINNAPI_KEY != ''
 
+      # BetExplorer scraper (same repo/branch as daily-recommendations.yml): final scores of past bets
+      - name: Checkout BetExplorer
+        if: env.PINNAPI_KEY != ''
+        uses: actions/checkout@v4
+        with:
+          repository: andrei0182/bet
+          ref: claude/trusting-ramanujan-2xdf01
+          path: bet
+
       - name: Checkout state branch (value-data)
         if: env.PINNAPI_KEY != ''
         env:
@@ -77,6 +87,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install -e .
+          pip install -r bet/requirements.txt
 
       - name: Compute today's date
         if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true'
@@ -101,7 +112,7 @@ jobs:
             python main.py --date "$d" --all --with-stats --output "output/matches_$d.xlsx"
             d=$(date -d "$d + 1 day" +%F)
           done
-          python value_daily.py --date "$START" --end "$END" --state-dir state
+          python value_daily.py --date "$START" --end "$END" --state-dir state --bet-repo bet
 
       - name: Find value bets and email the report
         if: env.PINNAPI_KEY != '' && env.SKIP_RUN != 'true' && inputs.start_date == ''
@@ -111,7 +122,7 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: |
           python value_daily.py --date ${{ steps.date.outputs.value }} \
-            --superbet-xlsx output/matches.xlsx --state-dir state
+            --superbet-xlsx output/matches.xlsx --state-dir state --bet-repo bet
           echo "${{ steps.date.outputs.value }}" > state/.last_value_date
 
       - name: Weekly summary (Mondays, or on demand)

@@ -1,22 +1,27 @@
 name: Pinnacle snapshots (closing lines for value bets)
 
-# Every 2 hours: one pinnapi.com request (free tier: 100/day) for all prematch soccer odds.
-# The last snapshot taken before each kick-off is that match's closing line, used to
-# measure the value bets' CLV. State lives on the `value-data` branch, not on main.
-# GitHub does not guarantee cron timing (runs can be late), so closing lines are approximate.
+# One pinnapi.com request per snapshot (all prematch soccer odds at once). The last snapshot taken
+# before each kick-off is that match's closing line, used to measure the value bets' closing EV.
+# State lives on the `value-data` branch, not on main.
+#
+# Schedule and pinnapi budget (free tier: 100 requests per UTC day; our cap: 90, enforced in code
+# from state/pinnapi_requests.csv):
+#   - baseline every 2 hours, always fetches ............................ 12 requests/day
+#   - every 15 minutes between 09:00 and 21:59 UTC (12:00-00:59 Romania in summer, 11:00-23:59
+#     in winter), but only when a known match starts in the next 3 hours (otherwise the run
+#     exits without a request) ....................................... at most 52 requests/day
+#   - value-bets.yml daily run (1, plus 1 per manual run) ...................... ~1-2 requests/day
+#   Worst case ~66/day, typically 40-55 (no matches in the next 3h -> no request).
+# GitHub does not guarantee cron timing (runs can be late or dropped), so closing lines remain
+# approximate; the dense window makes the last capture before kick-off much closer to the start.
 
 permissions:
   contents: write  # push snapshots to the value-data branch
 
 on:
   schedule:
-    - cron: "15 */2 * * *"
-    # Extra runs before the evening kick-offs (GitHub often delays or drops scheduled runs; in
-    # September the 2-hour schedule actually ran every 4-5 hours, leaving many bets without a
-    # snapshot taken after them). ~17:40, 19:40 and 21:10 Romania time (summer).
-    - cron: "40 14 * * *"
-    - cron: "40 16 * * *"
-    - cron: "10 18 * * *"
+    - cron: "15 */2 * * *"            # baseline (also catches early/late kick-offs outside the window)
+    - cron: "5,20,35,50 9-21 * * *"   # dense, gated: only if a match starts within 3 hours
   workflow_dispatch: {}
 
 concurrency:
@@ -59,7 +64,12 @@ jobs:
 
       - name: Snapshot Pinnacle odds
         if: env.PINNAPI_KEY != ''
-        run: superbet pinnacle-snapshot --out state/sharp.csv --history state/pinnacle_snapshots.csv
+        env:
+          # dense runs fetch only when a known match starts within 3 hours; baseline/manual runs always fetch
+          GATE: ${{ github.event.schedule == '5,20,35,50 9-21 * * *' && '180' || '0' }}
+        run: |
+          superbet pinnacle-snapshot --out state/sharp.csv --history state/pinnacle_snapshots.csv \
+            --only-if-kickoff-within "$GATE" --requests-log state/pinnapi_requests.csv --max-per-day 90
 
       - name: Commit state
         if: env.PINNAPI_KEY != ''

@@ -29,6 +29,8 @@ def main() -> None:
                         help="Last date of a multi-day run (--date is the first); Superbet files are read from "
                              "--superbet-pattern, one per day")
     parser.add_argument("--superbet-pattern", default="output/matches_{date}.xlsx")
+    parser.add_argument("--bet-repo", default=None,
+                        help="Checkout of andrei0182/bet: scores of past bets are scraped from BetExplorer")
     parser.add_argument("--weekly", action="store_true",
                         help="Send the weekly summary for the 7 days before --date instead of the daily report")
     parser.add_argument("--dry-run", action="store_true", help="Print the email instead of sending it")
@@ -54,7 +56,7 @@ def main() -> None:
         files = {d: args.superbet_pattern.format(date=d) for d in dates}
         try:
             results = run_range(dates, files, args.state_dir, StakingConfig(ev_min=args.ev_min, bankroll=args.bankroll),
-                                args.ev_min, team_map=team_map)
+                                args.ev_min, team_map=team_map, bet_repo=args.bet_repo)
         except PinnapiUnavailable as exc:
             print(f"::warning::Raport value bets sărit, pinnapi indisponibil: {exc}")
             return
@@ -70,7 +72,8 @@ def main() -> None:
 
     try:
         result = run_daily(args.date, args.superbet_xlsx, args.state_dir, StakingConfig(ev_min=args.ev_min,
-                           bankroll=args.bankroll), args.ev_min, team_map=team_map)
+                           bankroll=args.bankroll), args.ev_min, team_map=team_map,
+                           bet_repo=args.bet_repo)
     except PinnapiUnavailable as exc:
         print(f"::warning::Raport value bets sărit, pinnapi indisponibil: {exc}")
         return

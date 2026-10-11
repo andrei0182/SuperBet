@@ -84,7 +84,8 @@ def test_settle_and_summarize():
     s = settle(log, results)
     home = s[(s["home"] == "Arsenal") & (s["selection"] == "1")].iloc[0]
     assert home["won"] == 1 and home["profit"] == pytest.approx(home["stake"] * 1.3)
-    assert home["clv"] == pytest.approx(2.3 / 1.9 - 1)
+    assert home["clv_raw"] == pytest.approx(2.3 / 1.9 - 1)
+    assert home["result_status"] == "settled" and home["closing_status"] == "ok"
     assert home["ev_close"] == pytest.approx(2.3 * devig(np.array([[1.9, 3.7, 4.5]]), "power")[0, 0] - 1)
     summary = summarize(s)
     assert summary["settled"] == len(s) and summary["ev_close_mean"] is not None
@@ -137,7 +138,36 @@ def test_closing_status_requires_a_snapshot_after_the_bet():
                        "close_taken_at": ["2026-09-26T11:00:00+00:00", "2026-09-26T15:00:00+00:00",
                                           "2026-09-26T15:00:00+00:00", None]})
     status = closing_status(df, np.array([2.0, 2.0, 2.0, np.nan]))
-    assert status.tolist() == ["fara_captura_ulterioara", "ok", "nemasurat", "fara_inchidere"]
+    assert status.tolist() == ["no_close", "ok", "ok", "missing_close"]
     # historical result files have no snapshot times: their PSC* closing prices are genuine
     assert closing_status(df.drop(columns=["close_taken_at"]), np.array([2.0, np.nan, 2.0, 2.0])).tolist() == \
-        ["ok", "fara_inchidere", "ok", "ok"]
+        ["ok", "missing_close", "ok", "ok"]
+
+
+def test_closing_status_without_logged_at_uses_the_price():
+    """Old bets (no logged_at): a close giving exactly the bet's EV is the selection capture itself."""
+    from superbet.value import closing_status
+
+    df = pd.DataFrame({"ev": [0.05, 0.05, 0.05], "close_taken_at": ["2026-09-26T15:00:00+00:00"] * 3})
+    status = closing_status(df, np.array([2.0, 2.0, 2.0]), np.array([0.05, 0.02, np.nan]))
+    assert status.tolist() == ["no_close", "ok", "ok"]
+    # an old log without the logged_at column at all must not crash (it did with tz-aware vs naive times)
+    assert closing_status(df, np.array([2.0, np.nan, 2.0])).tolist() == ["ok", "missing_close", "ok"]
+
+
+def test_settle_old_log_excludes_same_capture_and_keeps_scores():
+    log = find_value(_table(), ["AA", "BB"], STAKING, 0.02, 8.0)
+    arsenal = (log["home"] == "Arsenal") & (log["selection"] == "1")
+    log = log[arsenal].assign(FTHG=[2.0], FTAG=[0.0])
+    same = pd.DataFrame({"date": pd.to_datetime(["2024-03-02"]), "home": ["Arsenal"], "away": ["Chelsea"],
+                         "PSCH": [2.0], "PSCD": [3.6], "PSCA": [4.2], "taken_at": ["2024-03-02T10:00:00Z"]})
+    s = settle(log, same)
+    assert s["closing_status"].tolist() == ["no_close"] and np.isnan(s["ev_close"].iloc[0])
+    assert s["won"].iloc[0] == 1 and s["profit_flat"].iloc[0] == pytest.approx(1.3)  # scores from the log
+    summary = summarize(s)
+    assert summary["no_close"] == 1 and summary["with_closing_odds"] == 0 and summary["settled"] == 0
+
+    later = same.assign(PSCH=[1.9], PSCD=[3.7], PSCA=[4.5])
+    s = settle(log, later)
+    assert s["closing_status"].tolist() == ["ok"] and s["ev_close"].iloc[0] > 0
+    assert summarize(s)["settled"] == 1

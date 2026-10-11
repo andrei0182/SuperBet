@@ -86,6 +86,26 @@ def test_run_backtest_end_to_end(data_dir, tmp_path):
     assert "model_beats_market" in q and "verdict" in q
     assert summary["btts_backtested"] is False
     assert "note" in summary["probability_quality"]["btts"]
+    # Benter test: blend weights for every walk-forward window, saved in summary.json
+    windows = saved["blend_weights_by_window"]["1x2"]
+    fitted = [w for w in windows if w["w_model"] is not None]
+    assert len(windows) > 1 and fitted
+    assert {"window_start", "n_train", "w_model", "w_market", "model_share"} <= set(fitted[-1])
+    assert fitted[-1]["w_model"] == pytest.approx(saved["blend_coefficients_last"]["1x2"]["w_model"])
+    assert isinstance(saved["blend_warnings"], list)
+
+
+def test_blend_warnings_flag_a_near_zero_model_weight():
+    from superbet.backtest import blend_warnings, model_weight_share
+
+    row = lambda wm, wq: {"window_start": "2024-01-01", "w_model": wm, "w_market": wq,  # noqa: E731
+                          "model_share": model_weight_share(wm, wq)}
+    unfitted = {"window_start": "2023-01-01", "w_model": None, "w_market": None, "model_share": None}
+    assert blend_warnings({"1x2": [unfitted, row(0.6, 0.5)]}) == []
+    warn = blend_warnings({"1x2": [row(0.6, 0.5), row(0.03, 1.1)], "ou25": [unfitted]})
+    assert len(warn) == 1 and "1x2" in warn[0] and "aproape zero" in warn[0]
+    assert "negativă" in blend_warnings({"ou25": [row(-0.4, 1.2)]})[0]
+    assert model_weight_share(0.0, 0.0) is None and model_weight_share(1.0, 3.0) == pytest.approx(0.25)
 
 
 def test_cli_fit_predict_backtest(data_dir, tmp_path):

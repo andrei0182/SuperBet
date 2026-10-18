@@ -137,4 +137,8 @@ date,league,home_team,away_team,odds_over,kickoff_local,result,total_goals,check
 2026-10-15,EUROPE: EUROPA LEAGUE,Ferencvaros,Plzen,1.67,22:00,over,3,2026-10-16
 2026-10-15,EUROPE: EUROPA LEAGUE,Jagiellonia,Ararat-Armenia,1.61,22:00,over,4,2026-10-16
 2026-10-15,EUROPE: EUROPA LEAGUE,Marseille,Olympiacos Piraeus,1.74,22:00,under,1,2026-10-16
-2026-10-16,MYANMAR: NATIONAL LEAGUE,Thitsar Arman,Ispe FC,1.37,12:00,pending,,
+2026-10-16,MYANMAR: NATIONAL LEAGUE,Thitsar Arman,Ispe FC,1.37,12:00,over,5,2026-10-18
+2026-10-18,ENGLAND: PREMIER LEAGUE 2,Brighton U21,Bournemouth U21,1.4,15:30,pending,,
+2026-10-18,HONG KONG: PREMIER LEAGUE,Shatin,Hong Kong FC,1.44,11:00,pending,,
+2026-10-18,MALTA: CHALLENGE LEAGUE,Naxxar,Victoria Hotspurs,1.51,15:00,pending,,
+2026-10-18,SINGAPORE: PREMIER LEAGUE,FC Jurong,Lion City,1.42,14:30,pending,,

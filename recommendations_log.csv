@@ -171,7 +171,10 @@ date,league,home_team,away_team,odds_over,kickoff_local,result,total_goals,check
 2026-10-28,ROMANIA: ROMANIAN CUP,Sporting Liesti,FC Bacau,,15:00,under,0,2026-10-29
 2026-10-28,VENEZUELA: LIGA FUTVE,Carabobo,La Guaira,2.2,01:30,over,4,2026-10-29
 2026-10-28,VENEZUELA: LIGA FUTVE,Metropolitanos,Portuguesa,1.88,01:30,under,0,2026-10-29
-2026-10-30,AUSTRALIA: A-LEAGUE,Brisbane Roar,Auckland FC,1.9,11:00,pending,,
-2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Birmingham U21,Swansea U21,1.27,21:00,pending,,
-2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Coventry U21,Ipswich U21,1.26,21:00,pending,,
-2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Newcastle Utd U21,Peterborough U21,1.25,21:00,pending,,
+2026-10-30,AUSTRALIA: A-LEAGUE,Brisbane Roar,Auckland FC,1.9,11:00,under,2,2026-10-31
+2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Birmingham U21,Swansea U21,1.27,21:00,over,3,2026-10-31
+2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Coventry U21,Ipswich U21,1.26,21:00,under,1,2026-10-31
+2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Newcastle Utd U21,Peterborough U21,1.25,21:00,under,2,2026-10-31
+2026-10-31,BELGIUM: SECOND AMATEUR DIVISION GROUP VFV B,Hades,Wilrijk,,20:30,pending,,
+2026-10-31,HONG KONG: PREMIER LEAGUE,Eastern District,Shatin,1.44,09:00,pending,,
+2026-10-31,SINGAPORE: PREMIER LEAGUE,Hougang,Young Lions,1.31,13:30,pending,,

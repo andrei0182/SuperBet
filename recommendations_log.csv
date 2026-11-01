@@ -175,6 +175,8 @@ date,league,home_team,away_team,odds_over,kickoff_local,result,total_goals,check
 2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Birmingham U21,Swansea U21,1.27,21:00,over,3,2026-10-31
 2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Coventry U21,Ipswich U21,1.26,21:00,under,1,2026-10-31
 2026-10-30,ENGLAND: PREMIER LEAGUE CUP,Newcastle Utd U21,Peterborough U21,1.25,21:00,under,2,2026-10-31
-2026-10-31,BELGIUM: SECOND AMATEUR DIVISION GROUP VFV B,Hades,Wilrijk,,20:30,pending,,
-2026-10-31,HONG KONG: PREMIER LEAGUE,Eastern District,Shatin,1.44,09:00,pending,,
-2026-10-31,SINGAPORE: PREMIER LEAGUE,Hougang,Young Lions,1.31,13:30,pending,,
+2026-10-31,BELGIUM: SECOND AMATEUR DIVISION GROUP VFV B,Hades,Wilrijk,,20:30,over,5,2026-11-01
+2026-10-31,HONG KONG: PREMIER LEAGUE,Eastern District,Shatin,1.44,09:00,over,3,2026-11-01
+2026-10-31,SINGAPORE: PREMIER LEAGUE,Hougang,Young Lions,1.31,13:30,under,2,2026-11-01
+2026-11-01,AUSTRALIA: A-LEAGUE,Perth Glory,Adelaide United,1.66,10:00,pending,,
+2026-11-01,CAMEROON: ELITE ONE,Aigle Royal,Stade Renard,1.92,16:30,pending,,

@@ -178,5 +178,6 @@ date,league,home_team,away_team,odds_over,kickoff_local,result,total_goals,check
 2026-10-31,BELGIUM: SECOND AMATEUR DIVISION GROUP VFV B,Hades,Wilrijk,,20:30,over,5,2026-11-01
 2026-10-31,HONG KONG: PREMIER LEAGUE,Eastern District,Shatin,1.44,09:00,over,3,2026-11-01
 2026-10-31,SINGAPORE: PREMIER LEAGUE,Hougang,Young Lions,1.31,13:30,under,2,2026-11-01
-2026-11-01,AUSTRALIA: A-LEAGUE,Perth Glory,Adelaide United,1.66,10:00,pending,,
-2026-11-01,CAMEROON: ELITE ONE,Aigle Royal,Stade Renard,1.92,16:30,pending,,
+2026-11-01,AUSTRALIA: A-LEAGUE,Perth Glory,Adelaide United,1.66,10:00,over,4,2026-11-02
+2026-11-01,CAMEROON: ELITE ONE,Aigle Royal,Stade Renard,1.92,16:30,over,4,2026-11-02
+2026-11-02,ENGLAND: PREMIER LEAGUE CUP,Exeter U21,Reading U21,1.37,21:00,pending,,

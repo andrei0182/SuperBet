@@ -187,4 +187,8 @@ date,league,home_team,away_team,odds_over,kickoff_local,result,total_goals,check
 2026-11-03,EUROPE: CHAMPIONS LEAGUE,Barcelona,Aston Villa,1.19,22:00,over,3,2026-11-04
 2026-11-03,EUROPE: CHAMPIONS LEAGUE,Villarreal,PSG,1.35,22:00,over,6,2026-11-04
 2026-11-03,SAUDI ARABIA: DIVISION 2,Mudhar Club,Baish,1.68,13:55,over,4,2026-11-04
-2026-11-04,EGYPT: LEAGUE CUP,ZED,El Gaish,2.57,17:00,pending,,
+2026-11-04,EGYPT: LEAGUE CUP,ZED,El Gaish,2.57,17:00,under,0,2026-11-05
+2026-11-05,EUROPE: CONFERENCE LEAGUE,Lugano,Kauno Zalgiris,1.36,22:00,pending,,
+2026-11-05,EUROPE: CONFERENCE LEAGUE,Panathinaikos,CSKA Sofia,1.68,22:00,pending,,
+2026-11-05,EUROPE: EUROPA LEAGUE,Celtic,Besiktas,1.55,22:00,pending,,
+2026-11-05,EUROPE: EUROPA LEAGUE,Torreense,Ararat-Armenia,2.0,22:00,pending,,
